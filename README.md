@@ -26,11 +26,14 @@ numpy
 
 ## Add the Input Video
 
-Place the recorded gameplay clip at:
+The default gameplay clip is:
 
 ```text
-data/input/gameplay.mp4
+data/input/gameplay3.mp4
 ```
+
+The initialization and tracking commands also accept a different video with
+`--input`.
 
 Run all commands from the repository’s root directory:
 
@@ -56,17 +59,47 @@ data/output/detected_lines.mp4
 python -m src.initialize_homography
 ```
 
-Select the requested points in this order:
+The first window is a frame browser. Move to a frame where three yard lines
+and both hash rows are visible:
 
 ```text
-Point 1: 20-yard line × left hash row
-Point 2: 20-yard line × right hash row
+A / D      Previous or next frame
+[ / ]      Previous or next second
+Enter      Use the displayed frame
+Escape     Cancel
+```
 
-Point 3: 30-yard line × left hash row
-Point 4: 30-yard line × right hash row
+The yard lines do not have to be visible in frame zero. After selecting a
+frame, click the requested intersections in the displayed order.
 
-Point 5: 40-yard line × left hash row
-Point 6: 40-yard line × right hash row
+The default calibration uses the 20, 30, and 40-yard lines on the left half
+of the fixed field model. To initialize the supplied cropped clip around
+frame 60 using the visible 30, 40, and 50-yard lines, run:
+
+```bash
+python -m src.initialize_homography \
+  --input ../cropped_clip_3.mp4 \
+  --output-dir data/output/cropped_clip_3 \
+  --frame-index 60 \
+  --yard-lines 30 40 50 \
+  --field-half left
+```
+
+Omit `--frame-index 60` to choose the frame interactively. Use
+`--field-half right` when the selected markings are after midfield in the
+fixed field model.
+
+For the default calibration, select the requested points in this order:
+
+```text
+Point 1: 20-yard line × upper hash row
+Point 2: 20-yard line × lower hash row
+
+Point 3: 30-yard line × upper hash row
+Point 4: 30-yard line × lower hash row
+
+Point 5: 40-yard line × upper hash row
+Point 6: 40-yard line × lower hash row
 ```
 
 The points should form this arrangement:
@@ -110,6 +143,15 @@ The tracked video will be saved at:
 
 ```text
 data/output/tracked_field.mp4
+```
+
+For a custom clip and initialization file, run:
+
+```bash
+python -m src.track_video \
+  --input ../cropped_clip_3.mp4 \
+  --initialization data/output/cropped_clip_3/initial_homography.npz \
+  --output data/output/cropped_clip_3/tracked_field.mp4
 ```
 
 ## Run Order

@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import cv2
@@ -21,6 +22,31 @@ OUTPUT_PATH = Path(
 )
 
 
+def build_argument_parser():
+    parser = argparse.ArgumentParser(
+        description="Track a saved field homography through a gameplay video."
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=INPUT_PATH,
+        help="Gameplay video to track.",
+    )
+    parser.add_argument(
+        "--initialization",
+        type=Path,
+        default=INITIALIZATION_PATH,
+        help="Homography file created by initialize_homography.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_PATH,
+        help="Tracked overlay video to create.",
+    )
+    return parser
+
+
 def get_confidence(tracked_count, inlier_count):
     if tracked_count == 0:
         return "LOW"
@@ -36,13 +62,15 @@ def get_confidence(tracked_count, inlier_count):
     return "LOW"
 
 
-def main():
-    if not INITIALIZATION_PATH.exists():
+def main(arguments=None):
+    args = build_argument_parser().parse_args(arguments)
+
+    if not args.initialization.exists():
         raise RuntimeError(
             "Run python -m src.initialize_homography first."
         )
 
-    initialization = np.load(INITIALIZATION_PATH)
+    initialization = np.load(args.initialization)
 
     fixed_field_points = initialization[
         "field_points"
@@ -60,11 +88,11 @@ def main():
         initialization["frame_index"]
     )
 
-    capture = cv2.VideoCapture(str(INPUT_PATH))
+    capture = cv2.VideoCapture(str(args.input))
 
     if not capture.isOpened():
         raise RuntimeError(
-            f"Could not open video: {INPUT_PATH}"
+            f"Could not open video: {args.input}"
         )
 
     width = int(
@@ -89,8 +117,10 @@ def main():
             "Could not read the initialization frame."
         )
 
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
     writer = cv2.VideoWriter(
-        str(OUTPUT_PATH),
+        str(args.output),
         cv2.VideoWriter_fourcc(*"mp4v"),
         fps,
         (width, height),
@@ -98,7 +128,7 @@ def main():
 
     if not writer.isOpened():
         raise RuntimeError(
-            f"Could not create output: {OUTPUT_PATH}"
+            f"Could not create output: {args.output}"
         )
 
     previous_gray = cv2.cvtColor(
@@ -239,7 +269,7 @@ def main():
     writer.release()
     cv2.destroyAllWindows()
 
-    print(f"Saved tracked video to: {OUTPUT_PATH}")
+    print(f"Saved tracked video to: {args.output}")
 
 
 if __name__ == "__main__":

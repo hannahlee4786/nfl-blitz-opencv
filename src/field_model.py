@@ -12,49 +12,61 @@ UPPER_HASH_Y = 23.58
 LOWER_HASH_Y = 29.75
 
 
-# IMPORTANT:
-# Edit the x-coordinates below to match the specific yard lines visible
-# in your chosen initialization frame.
-#
 # Coordinate convention:
 #   (0, 0) = upper-left corner of the entire field
 #   x increases toward the right end zone
 #   y increases toward the lower sideline
-#
-# These six points represent three yard lines intersecting two hash rows.
-CALIBRATION_POINTS = [
-    {
-        "label": "20-yard line, left hash",
-        "coordinate": (30.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "20-yard line, right hash",
-        "coordinate": (30.0, LOWER_HASH_Y),
-    },
-    {
-        "label": "30-yard line, left hash",
-        "coordinate": (40.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "30-yard line, right hash",
-        "coordinate": (40.0, LOWER_HASH_Y),
-    },
-    {
-        "label": "40-yard line, left hash",
-        "coordinate": (50.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "40-yard line, right hash",
-        "coordinate": (50.0, LOWER_HASH_Y),
-    },
-]
 
 
-def get_calibration_field_points():
+def build_calibration_points(yard_lines, field_half):
+    """Build field points for three visible yard lines and both hash rows."""
+
+    yard_lines = list(yard_lines)
+
+    if len(yard_lines) != 3:
+        raise ValueError("Exactly three yard lines are required.")
+
+    if len(set(yard_lines)) != 3:
+        raise ValueError("The three yard lines must be distinct.")
+
+    if any(yard_line < 0 or yard_line > 50 for yard_line in yard_lines):
+        raise ValueError("Yard-line labels must be between 0 and 50.")
+
+    if field_half not in {"left", "right"}:
+        raise ValueError("Field half must be 'left' or 'right'.")
+
+    points = []
+
+    for yard_line in yard_lines:
+        if field_half == "left":
+            field_x = 10.0 + yard_line
+        else:
+            field_x = 110.0 - yard_line
+
+        points.extend(
+            [
+                {
+                    "label": f"{yard_line}-yard line, upper hash",
+                    "coordinate": (field_x, UPPER_HASH_Y),
+                },
+                {
+                    "label": f"{yard_line}-yard line, lower hash",
+                    "coordinate": (field_x, LOWER_HASH_Y),
+                },
+            ]
+        )
+
+    return points
+
+
+CALIBRATION_POINTS = build_calibration_points([20, 30, 40], "left")
+
+
+def get_calibration_field_points(calibration_points=CALIBRATION_POINTS):
     """Return the permanent field coordinates used during initialization."""
 
     return np.array(
-        [point["coordinate"] for point in CALIBRATION_POINTS],
+        [point["coordinate"] for point in calibration_points],
         dtype=np.float32,
     )
 

@@ -1,14 +1,19 @@
+import argparse
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from src.field_model import (
-    CALIBRATION_POINTS,
+    build_calibration_points,
     create_field_grid,
     get_calibration_field_points,
 )
-from src.initialization import select_screen_points
+from src.initialization import (
+    read_video_frame,
+    select_initialization_frame,
+    select_screen_points,
+)
 from src.visualization import (
     draw_calibration_points,
     draw_field_grid,
@@ -18,11 +23,47 @@ from src.visualization import (
 INPUT_PATH = Path("data/input/gameplay3.mp4")
 
 OUTPUT_DIRECTORY = Path("data/output")
-HOMOGRAPHY_PATH = OUTPUT_DIRECTORY / "initial_homography.npz"
-PREVIEW_PATH = OUTPUT_DIRECTORY / "initial_homography_preview.png"
 
-# Change this if frame zero is blocked by graphics or players.
-INITIAL_FRAME_INDEX = 0
+
+def build_argument_parser():
+    parser = argparse.ArgumentParser(
+        description="Choose a video frame and initialize its field homography."
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=INPUT_PATH,
+        help="Gameplay video to initialize.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=OUTPUT_DIRECTORY,
+        help="Directory for the homography and preview files.",
+    )
+    parser.add_argument(
+        "--frame-index",
+        type=int,
+        help="Use this frame directly instead of opening the frame browser.",
+    )
+    parser.add_argument(
+        "--yard-lines",
+        type=int,
+        nargs=3,
+        default=[20, 30, 40],
+        metavar=("FIRST", "SECOND", "THIRD"),
+        help="Three visible yard-line labels, in click order.",
+    )
+    parser.add_argument(
+        "--field-half",
+        choices=("left", "right"),
+        default="left",
+        help=(
+            "Half of the fixed field model containing the selected lines. "
+            "Use left before midfield and right after midfield."
+        ),
+    )
+    return parser
 
 
 def calculate_reprojection_error(
@@ -43,38 +84,49 @@ def calculate_reprojection_error(
     return errors
 
 
-def main():
-    OUTPUT_DIRECTORY.mkdir(
+def main(arguments=None):
+    args = build_argument_parser().parse_args(arguments)
+    args.output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
+    homography_path = args.output_dir / "initial_homography.npz"
+    preview_path = args.output_dir / "initial_homography_preview.png"
 
-    capture = cv2.VideoCapture(str(INPUT_PATH))
+    capture = cv2.VideoCapture(str(args.input))
 
     if not capture.isOpened():
         raise RuntimeError(
-            f"Could not open video: {INPUT_PATH}"
+            f"Could not open video: {args.input}"
         )
 
-    capture.set(
-        cv2.CAP_PROP_POS_FRAMES,
-        INITIAL_FRAME_INDEX,
+    try:
+        if args.frame_index is None:
+            frame_index, frame = select_initialization_frame(capture)
+        else:
+            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            if not 0 <= args.frame_index < frame_count:
+                raise ValueError(
+                    f"Frame index must be between 0 and {frame_count - 1}."
+                )
+
+            frame_index = args.frame_index
+            frame = read_video_frame(capture, frame_index)
+    finally:
+        capture.release()
+
+    calibration_points = build_calibration_points(
+        args.yard_lines,
+        args.field_half,
     )
-
-    success, frame = capture.read()
-    capture.release()
-
-    if not success:
-        raise RuntimeError(
-            f"Could not read frame {INITIAL_FRAME_INDEX}"
-        )
-
-    field_points = get_calibration_field_points()
+    field_points = get_calibration_field_points(calibration_points)
 
     print()
+    print(f"Using frame {frame_index} from {args.input}")
     print("Select these points in the displayed order:")
 
-    for index, point in enumerate(CALIBRATION_POINTS):
+    for index, point in enumerate(calibration_points):
         print(
             f"{index + 1}. {point['label']} "
             f"-> {point['coordinate']}"
@@ -82,7 +134,7 @@ def main():
 
     screen_points = select_screen_points(
         frame,
-        CALIBRATION_POINTS,
+        calibration_points,
     )
 
     homography, inlier_mask = cv2.findHomography(
@@ -121,12 +173,15 @@ def main():
     )
 
     np.savez(
-        HOMOGRAPHY_PATH,
+        homography_path,
         homography=homography,
         field_points=field_points,
         screen_points=screen_points,
         inlier_mask=inlier_mask,
-        frame_index=INITIAL_FRAME_INDEX,
+        frame_index=frame_index,
+        input_path=str(args.input),
+        yard_lines=np.asarray(args.yard_lines, dtype=np.int32),
+        field_half=args.field_half,
     )
 
     preview = draw_field_grid(
@@ -141,12 +196,12 @@ def main():
     )
 
     cv2.imwrite(
-        str(PREVIEW_PATH),
+        str(preview_path),
         preview,
     )
 
-    print(f"Saved homography to: {HOMOGRAPHY_PATH}")
-    print(f"Saved preview to: {PREVIEW_PATH}")
+    print(f"Saved homography to: {homography_path}")
+    print(f"Saved preview to: {preview_path}")
 
     # Show the result for inspection.
     display_height, display_width = preview.shape[:2]
