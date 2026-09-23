@@ -3,6 +3,10 @@ import cv2
 import numpy as np
 
 
+# Height of the instruction panel shown above the frame.
+PANEL_HEIGHT = 80
+
+
 def select_screen_points(frame, calibration_points):
     """
     Display a frame and ask the user to click each known field landmark.
@@ -13,10 +17,11 @@ def select_screen_points(frame, calibration_points):
     original_height, original_width = frame.shape[:2]
 
     # Scale the display down if the video is larger than the screen.
+    # Leave room for the instruction panel above the frame.
     display_scale = min(
         1.0,
         1100 / original_width,
-        800 / original_height,
+        (800 - PANEL_HEIGHT) / original_height,
     )
 
     display_width = int(original_width * display_scale)
@@ -66,12 +71,16 @@ def select_screen_points(frame, calibration_points):
         else:
             instruction = "All points selected. Press ENTER to continue."
 
-        cv2.rectangle(
+        # Add the panel above the frame instead of drawing it on top,
+        # so landmarks near the top edge stay visible and clickable.
+        display = cv2.copyMakeBorder(
             display,
-            (0, 0),
-            (display_width, 80),
-            (0, 0, 0),
-            -1,
+            PANEL_HEIGHT,
+            0,
+            0,
+            0,
+            cv2.BORDER_CONSTANT,
+            value=(0, 0, 0),
         )
 
         cv2.putText(
@@ -101,6 +110,12 @@ def select_screen_points(frame, calibration_points):
             return
 
         if len(selected_points) >= len(calibration_points):
+            return
+
+        # Ignore clicks on the instruction panel.
+        display_y -= PANEL_HEIGHT
+
+        if display_y < 0:
             return
 
         # Convert the displayed location back into original-frame pixels.

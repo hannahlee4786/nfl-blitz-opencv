@@ -4,119 +4,67 @@ OpenCV prototype for detecting football-field lines, establishing a fixed field 
 
 ## Setup
 
-Create and activate a Python virtual environment:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Install the required libraries:
-
-```bash
 python3 -m pip install -r requirements.txt
 ```
 
-If `requirements.txt` has not been created, it should contain:
+Put gameplay clips in `data/input/` and run every command from the repository root. Clips are referred to by the start of their file name (for example `Clip_2`), so names with spaces need no quotes.
 
-```text
-opencv-python
-numpy
-```
-
-## Add the Input Video
-
-Place the recorded gameplay clip at:
-
-```text
-data/input/gameplay.mp4
-```
-
-Run all commands from the repository’s root directory:
-
-```text
-nfl-blitz-tracker/
-```
-
-## Run Field-Line Detection
+## 1. Field-Line Detection (optional)
 
 ```bash
 python -m src.main
 ```
 
-The processed video will be saved in:
+Processes every clip in `data/input/` and saves `data/output/<clip>_lines.mp4`.
 
-```text
-data/output/detected_lines.mp4
-```
+## 2. Calibrate a Clip
 
-## Initialize the Field Coordinate System
+Once per clip:
 
 ```bash
-python -m src.initialize_homography
+python -m src.initialize_homography Clip_2
 ```
 
-Select the requested points in this order:
+Click the center of each painted yard number, in the order shown on screen: on the yard line, between the two digits, at the middle of the number's width.
+
+![Where to click](docs/calibration_guide.jpg)
 
 ```text
-Point 1: 20-yard line × left hash row
-Point 2: 20-yard line × right hash row
-
-Point 3: 30-yard line × left hash row
-Point 4: 30-yard line × right hash row
-
-Point 5: 40-yard line × left hash row
-Point 6: 40-yard line × right hash row
+1: 20-yard line, left number    2: 20-yard line, right number
+3: 30-yard line, left number    4: 30-yard line, right number
+5: 40-yard line, left number    6: 40-yard line, right number
 ```
 
-The points should form this arrangement:
+Controls: left click to select, `U` undo, `R` reset, `Enter` calculate, `Esc` cancel.
 
-```text
-Point 1 ---------------- Point 2
+Options:
 
-Point 3 ---------------- Point 4
+| Option | Use |
+| --- | --- |
+| `--frame N` | Click on frame `N` instead of frame 0, if points are covered |
+| `--yard-lines 10 20 30` | Click different yard lines |
+| `--far-half` | The yard lines are on the half away from the COWBOYS end zone (needed for `Clip_1`, where the 20 is nearest the bottom of the screen) |
 
-Point 5 ---------------- Point 6
-```
+Saves `data/output/<clip>_homography.npz` and `data/output/<clip>_homography_preview.png`. Check that the purple grid sits on the yard lines; if not, run it again.
 
-Click the intersections between the three yard lines and the two columns of hash marks near the middle of the field. Do not place all six points on the same line or click the painted yard numbers.
-
-Controls:
-
-```text
-Left click — Select a point
-U          — Undo the previous point
-R          — Reset all points
-Enter      — Calculate the homography
-Escape     — Cancel
-```
-
-The initializer will save:
-
-```text
-data/output/initial_homography.npz
-data/output/initial_homography_preview.png
-```
-
-Check that the purple grid aligns with the yard lines before continuing.
-
-## Run Field and Camera Tracking
+## 3. Track the Clip
 
 ```bash
-python -m src.track_video
+python -m src.track_video Clip_2
 ```
 
-The tracked video will be saved at:
+Leave out the name to track every calibrated clip. Saves `data/output/<clip>_tracked.mp4`: the purple grid should stay on the painted lines as the camera moves.
 
-```text
-data/output/tracked_field.mp4
-```
-
-## Run Order
+## Example
 
 ```bash
 source .venv/bin/activate
-python -m src.main
-python -m src.initialize_homography
+python -m src.initialize_homography gameplay3
+python -m src.initialize_homography Clip_2
+python -m src.initialize_homography Clip_4
+python -m src.initialize_homography Clip_1 --far-half
 python -m src.track_video
 ```
