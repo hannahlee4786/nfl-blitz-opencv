@@ -28,53 +28,83 @@ def draw_field_grid(frame, grid_lines, homography):
     result = frame.copy()
     height, width = result.shape[:2]
 
+    # Field points in front of the camera share the sign of their
+    # projective w with the point seen at the image center.
+    image_center = np.array([width / 2, height / 2, 1.0])
+    center_on_field = np.linalg.inv(homography) @ image_center
+    center_on_field /= center_on_field[2]
+    front_sign = np.sign((homography @ center_on_field)[2])
+
     for start, end in grid_lines:
-        field_line = np.array(
-            [
-                [start],
-                [end],
-            ],
-            dtype=np.float32,
+        # Split each line into short pieces so the parts behind the
+        # camera can be skipped. Projecting only the two endpoints
+        # draws a wrong line when one of them is behind the camera.
+        steps = np.linspace(0.0, 1.0, 61)[:, None]
+        field_points = (
+            np.array(start) + steps * (np.array(end) - np.array(start))
         )
 
-        transformed = cv2.perspectiveTransform(
-            field_line,
-            homography,
-        )
+        projected = np.hstack(
+            [field_points, np.ones((len(field_points), 1))]
+        ) @ homography.T
 
-        first = transformed[0, 0]
-        second = transformed[1, 0]
+        w = projected[:, 2] * front_sign
+        screen_points = projected[:, :2] / projected[:, 2:3]
 
-        # Ignore invalid projected values.
-        if not np.all(np.isfinite([first, second])):
-            continue
+        for index in range(len(screen_points) - 1):
+            if w[index] <= 0 or w[index + 1] <= 0:
+                continue
 
-        point1 = (
-            int(round(first[0])),
-            int(round(first[1])),
-        )
+            first = screen_points[index]
+            second = screen_points[index + 1]
 
-        point2 = (
-            int(round(second[0])),
-            int(round(second[1])),
-        )
+            # Skip pieces near the horizon that project too far away.
+            if np.abs(np.concatenate([first, second])).max() > 1e5:
+                continue
 
-        # Clip grid lines to the visible frame.
-        visible, clipped_point1, clipped_point2 = cv2.clipLine(
-            (0, 0, width, height),
-            point1,
-            point2,
-        )
-
-        if visible:
-            cv2.line(
-                result,
-                clipped_point1,
-                clipped_point2,
-                (255, 0, 255),
-                2,
-                cv2.LINE_AA,
+            point1 = (
+                int(round(first[0])),
+                int(round(first[1])),
             )
+
+            point2 = (
+                int(round(second[0])),
+                int(round(second[1])),
+            )
+
+            # Clip grid lines to the visible frame.
+            visible, clipped_point1, clipped_point2 = cv2.clipLine(
+                (0, 0, width, height),
+                point1,
+                point2,
+            )
+
+            if visible:
+                cv2.line(
+                    result,
+                    clipped_point1,
+                    clipped_point2,
+                    (255, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+    return result
+
+
+def draw_tracked_points(frame, screen_points):
+    """Draw the automatically tracked field points as small dots."""
+
+    result = frame.copy()
+
+    for x, y in screen_points:
+        cv2.circle(
+            result,
+            (int(round(x)), int(round(y))),
+            2,
+            (0, 255, 0),
+            -1,
+        )
 
     return result
 

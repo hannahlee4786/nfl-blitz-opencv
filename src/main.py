@@ -1,36 +1,31 @@
 # Runs the complete video-processing pipeline
-from pathlib import Path
 import cv2
 
 # Importing functions from other files
 from src.line_detection import detect_field_lines, filter_field_lines
 from src.preprocessing import preprocess_frame
+from src.video_paths import INPUT_DIR, OUTPUT_DIR, list_input_videos
 from src.visualization import draw_detected_lines
 
-INPUT_PATH = Path("data/input/gameplay3.mp4")
-OUTPUT_PATH = Path("data/output/detected_lines.mp4")
-
-def main():
-  OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-  capture = cv2.VideoCapture(str(INPUT_PATH))
+def process_video(input_path, output_path):
+  capture = cv2.VideoCapture(str(input_path))
 
   if not capture.isOpened():
-    raise RuntimeError(f"Could not open video: {INPUT_PATH}")
+    raise RuntimeError(f"Could not open video: {input_path}")
 
   width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
   height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
   fps = capture.get(cv2.CAP_PROP_FPS)
 
   writer = cv2.VideoWriter(
-    str(OUTPUT_PATH),
+    str(output_path),
     cv2.VideoWriter_fourcc(*"mp4v"),
     fps,
     (width, height),
   )
 
   if not writer.isOpened():
-    raise RuntimeError(f"Could not create video: {OUTPUT_PATH}")
+    raise RuntimeError(f"Could not create video: {output_path}")
 
   while True:
     success, frame = capture.read()
@@ -48,7 +43,20 @@ def main():
   capture.release()
   writer.release()
 
-  print(f"Saved video to {OUTPUT_PATH}")
+def main():
+  OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+  input_paths = list_input_videos()
+
+  if not input_paths:
+    raise RuntimeError(f"No videos found in {INPUT_DIR}")
+
+  for input_path in input_paths:
+    output_path = OUTPUT_DIR / f"{input_path.stem}_lines.mp4"
+
+    print(f"Processing {input_path.name}...")
+    process_video(input_path, output_path)
+    print(f"Saved video to {output_path}")
 
 if __name__ == "__main__":
   main()

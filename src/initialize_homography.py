@@ -1,28 +1,63 @@
-from pathlib import Path
+import argparse
 
 import cv2
 import numpy as np
 
 from src.field_model import (
-    CALIBRATION_POINTS,
+    create_calibration_points,
     create_field_grid,
     get_calibration_field_points,
 )
 from src.initialization import select_screen_points
+from src.video_paths import (
+    OUTPUT_DIR,
+    calibration_path,
+    resolve_video,
+)
 from src.visualization import (
     draw_calibration_points,
     draw_field_grid,
 )
 
 
-INPUT_PATH = Path("data/input/gameplay3.mp4")
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Click field landmarks to calibrate one video.",
+    )
 
-OUTPUT_DIRECTORY = Path("data/output")
-HOMOGRAPHY_PATH = OUTPUT_DIRECTORY / "initial_homography.npz"
-PREVIEW_PATH = OUTPUT_DIRECTORY / "initial_homography_preview.png"
+    parser.add_argument(
+        "video",
+        nargs="?",
+        default="gameplay3",
+        help="Video path, or the start of a file name in data/input "
+        "(for example Clip_2).",
+    )
 
-# Change this if frame zero is blocked by graphics or players.
-INITIAL_FRAME_INDEX = 0
+    parser.add_argument(
+        "--frame",
+        type=int,
+        default=0,
+        help="Frame to click on. Pick one where the hash marks are "
+        "not covered by graphics or players.",
+    )
+
+    parser.add_argument(
+        "--yard-lines",
+        type=int,
+        nargs=3,
+        default=[20, 30, 40],
+        metavar="YARDS",
+        help="The three painted yard numbers to click.",
+    )
+
+    parser.add_argument(
+        "--far-half",
+        action="store_true",
+        help="The yard lines are on the half away from the x = 0 "
+        "(COWBOYS) end zone.",
+    )
+
+    return parser.parse_args()
 
 
 def calculate_reprojection_error(
@@ -44,21 +79,29 @@ def calculate_reprojection_error(
 
 
 def main():
-    OUTPUT_DIRECTORY.mkdir(
+    arguments = parse_arguments()
+
+    input_path = resolve_video(arguments.video)
+    homography_path = calibration_path(input_path)
+    preview_path = (
+        OUTPUT_DIR / f"{input_path.stem}_homography_preview.png"
+    )
+
+    OUTPUT_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    capture = cv2.VideoCapture(str(INPUT_PATH))
+    capture = cv2.VideoCapture(str(input_path))
 
     if not capture.isOpened():
         raise RuntimeError(
-            f"Could not open video: {INPUT_PATH}"
+            f"Could not open video: {input_path}"
         )
 
     capture.set(
         cv2.CAP_PROP_POS_FRAMES,
-        INITIAL_FRAME_INDEX,
+        arguments.frame,
     )
 
     success, frame = capture.read()
@@ -66,15 +109,21 @@ def main():
 
     if not success:
         raise RuntimeError(
-            f"Could not read frame {INITIAL_FRAME_INDEX}"
+            f"Could not read frame {arguments.frame}"
         )
 
-    field_points = get_calibration_field_points()
+    calibration_points = create_calibration_points(
+        arguments.yard_lines,
+        arguments.far_half,
+    )
+
+    field_points = get_calibration_field_points(calibration_points)
 
     print()
+    print(f"Calibrating {input_path.name}, frame {arguments.frame}")
     print("Select these points in the displayed order:")
 
-    for index, point in enumerate(CALIBRATION_POINTS):
+    for index, point in enumerate(calibration_points):
         print(
             f"{index + 1}. {point['label']} "
             f"-> {point['coordinate']}"
@@ -82,14 +131,17 @@ def main():
 
     screen_points = select_screen_points(
         frame,
-        CALIBRATION_POINTS,
+        calibration_points,
     )
 
+    # The painted numbers are wide targets, so careful clicks can still be
+    # a few pixels off center. At 3 px RANSAC drops some of them and fits
+    # the rest exactly; 8 px keeps them and still rejects a wrong click.
     homography, inlier_mask = cv2.findHomography(
         field_points,
         screen_points,
         cv2.RANSAC,
-        3.0,
+        8.0,
     )
 
     if homography is None:
@@ -121,12 +173,12 @@ def main():
     )
 
     np.savez(
-        HOMOGRAPHY_PATH,
+        homography_path,
         homography=homography,
         field_points=field_points,
         screen_points=screen_points,
         inlier_mask=inlier_mask,
-        frame_index=INITIAL_FRAME_INDEX,
+        frame_index=arguments.frame,
     )
 
     preview = draw_field_grid(
@@ -141,12 +193,12 @@ def main():
     )
 
     cv2.imwrite(
-        str(PREVIEW_PATH),
+        str(preview_path),
         preview,
     )
 
-    print(f"Saved homography to: {HOMOGRAPHY_PATH}")
-    print(f"Saved preview to: {PREVIEW_PATH}")
+    print(f"Saved homography to: {homography_path}")
+    print(f"Saved preview to: {preview_path}")
 
     # Show the result for inspection.
     display_height, display_width = preview.shape[:2]

@@ -11,50 +11,79 @@ FIELD_WIDTH = 53.333
 UPPER_HASH_Y = 23.58
 LOWER_HASH_Y = 29.75
 
+# Centers of the painted yard numbers, measured from the upper sideline.
+# NFL Blitz paints them 15.8 yards in from each sideline (measured on
+# gameplay3), not about 8 yards as on a real NFL field.
+UPPER_NUMBER_Y = 15.8
+LOWER_NUMBER_Y = FIELD_WIDTH - UPPER_NUMBER_Y
 
-# IMPORTANT:
-# Edit the x-coordinates below to match the specific yard lines visible
-# in your chosen initialization frame.
-#
+
 # Coordinate convention:
 #   (0, 0) = upper-left corner of the entire field
 #   x increases toward the right end zone
 #   y increases toward the lower sideline
 #
-# These six points represent three yard lines intersecting two hash rows.
-CALIBRATION_POINTS = [
-    {
-        "label": "20-yard line, left hash",
-        "coordinate": (30.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "20-yard line, right hash",
-        "coordinate": (30.0, LOWER_HASH_Y),
-    },
-    {
-        "label": "30-yard line, left hash",
-        "coordinate": (40.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "30-yard line, right hash",
-        "coordinate": (40.0, LOWER_HASH_Y),
-    },
-    {
-        "label": "40-yard line, left hash",
-        "coordinate": (50.0, UPPER_HASH_Y),
-    },
-    {
-        "label": "40-yard line, right hash",
-        "coordinate": (50.0, LOWER_HASH_Y),
-    },
-]
+# The x = 0 end zone is the COWBOYS end zone in the current clips.
 
 
-def get_calibration_field_points():
+def yard_line_x(yard_number, far_half=False):
+    """
+    Return the field x of a painted yard number.
+
+    The near half is the one next to the x = 0 end zone.
+    """
+
+    if far_half:
+        return 110.0 - yard_number
+
+    return 10.0 + yard_number
+
+
+def create_calibration_points(yard_numbers=(20, 30, 40), far_half=False):
+    """
+    Return the landmarks to click: the center of each painted yard number,
+    between its two digits, on both sides of the field.
+
+    The numbers sit about 22 yards apart, so the homography is pinned down
+    across the field better than with the hash rows, which are only about
+    6 yards apart.
+
+    "Left number" assumes the camera faces the x = 0 end zone, as it does
+    at the start of every current clip. Facing the other way swaps left and
+    right.
+    """
+
+    points = []
+
+    for yard_number in yard_numbers:
+        x = yard_line_x(yard_number, far_half)
+
+        points.append(
+            {
+                "label": f"{yard_number}-yard line, left number",
+                "coordinate": (x, UPPER_NUMBER_Y),
+            }
+        )
+
+        points.append(
+            {
+                "label": f"{yard_number}-yard line, right number",
+                "coordinate": (x, LOWER_NUMBER_Y),
+            }
+        )
+
+    return points
+
+
+# The 20, 30 and 40-yard lines on the near half.
+CALIBRATION_POINTS = create_calibration_points()
+
+
+def get_calibration_field_points(calibration_points=CALIBRATION_POINTS):
     """Return the permanent field coordinates used during initialization."""
 
     return np.array(
-        [point["coordinate"] for point in CALIBRATION_POINTS],
+        [point["coordinate"] for point in calibration_points],
         dtype=np.float32,
     )
 
