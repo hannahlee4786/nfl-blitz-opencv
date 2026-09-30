@@ -1,11 +1,16 @@
 import argparse
+import csv
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from src.field_model import create_field_grid
-from src.tracking import track_screen_points
+from src.preprocessing import preprocess_frame
+from src.tracking import (
+    build_feature_mask,
+    estimate_descriptor_camera_motion,
+)
 from src.visualization import (
     draw_calibration_points,
     draw_field_grid,
@@ -20,6 +25,7 @@ INITIALIZATION_PATH = Path(
 OUTPUT_PATH = Path(
     "data/output/tracked_field.mp4"
 )
+MINIMUM_FEATURE_INLIERS = 8
 
 
 def build_argument_parser():
@@ -53,13 +59,30 @@ def get_confidence(tracked_count, inlier_count):
 
     inlier_ratio = inlier_count / tracked_count
 
-    if tracked_count >= 6 and inlier_ratio >= 0.75:
+    if tracked_count >= 40 and inlier_ratio >= 0.75:
         return "HIGH"
 
-    if tracked_count >= 4 and inlier_ratio >= 0.50:
+    if tracked_count >= 15 and inlier_ratio >= 0.50:
         return "MEDIUM"
 
     return "LOW"
+
+
+def write_tracking_diagnostics(output_path, records):
+    """Write per-frame tracking quality information for later review."""
+
+    field_names = [
+        "frame",
+        "features",
+        "inliers",
+        "mean_alignment_error",
+        "status",
+    ]
+
+    with output_path.open("w", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=field_names)
+        writer.writeheader()
+        writer.writerows(records)
 
 
 def main(arguments=None):
@@ -71,10 +94,6 @@ def main(arguments=None):
         )
 
     initialization = np.load(args.initialization)
-
-    fixed_field_points = initialization[
-        "field_points"
-    ].astype(np.float32)
 
     previous_screen_points = initialization[
         "screen_points"
@@ -131,13 +150,12 @@ def main(arguments=None):
             f"Could not create output: {args.output}"
         )
 
-    previous_gray = cv2.cvtColor(
+    previous_gray, initial_field_mask = preprocess_frame(
         previous_frame,
-        cv2.COLOR_BGR2GRAY,
     )
-
-    active_field_points = fixed_field_points.copy()
+    previous_feature_mask = build_feature_mask(initial_field_mask)
     frame_index = initial_frame_index
+    diagnostics = []
 
     # Draw the initialization frame.
     output_frame = draw_field_grid(
@@ -159,6 +177,15 @@ def main(arguments=None):
     )
 
     writer.write(output_frame)
+    diagnostics.append(
+        {
+            "frame": frame_index,
+            "features": len(previous_screen_points),
+            "inliers": len(previous_screen_points),
+            "mean_alignment_error": 0.0,
+            "status": "HIGH",
+        }
+    )
 
     while True:
         success, current_frame = capture.read()
@@ -168,70 +195,31 @@ def main(arguments=None):
 
         frame_index += 1
 
-        current_gray = cv2.cvtColor(
+        current_gray, current_field_mask = preprocess_frame(
             current_frame,
-            cv2.COLOR_BGR2GRAY,
         )
+        current_feature_mask = build_feature_mask(current_field_mask)
 
         (
-            candidate_screen_points,
-            valid_mask,
-            tracking_errors,
-        ) = track_screen_points(
+            camera_motion,
+            feature_count,
+            inlier_count,
+            alignment_error,
+        ) = estimate_descriptor_camera_motion(
             previous_gray,
             current_gray,
-            previous_screen_points,
+            previous_feature_mask,
+            current_feature_mask,
         )
 
-        if candidate_screen_points is None:
-            valid_count = 0
+        if camera_motion is not None and inlier_count >= MINIMUM_FEATURE_INLIERS:
+            current_homography = camera_motion @ current_homography
+            current_homography /= current_homography[2, 2]
+            previous_gray = current_gray
+            previous_feature_mask = current_feature_mask
+            status = get_confidence(feature_count, inlier_count)
         else:
-            valid_count = int(valid_mask.sum())
-
-        inlier_count = 0
-
-        if valid_count >= 4:
-            valid_screen_points = (
-                candidate_screen_points[valid_mask]
-            ).astype(np.float32)
-
-            valid_field_points = (
-                active_field_points[valid_mask]
-            ).astype(np.float32)
-
-            new_homography, inlier_mask = (
-                cv2.findHomography(
-                    valid_field_points,
-                    valid_screen_points,
-                    cv2.RANSAC,
-                    3.0,
-                )
-            )
-
-            if (
-                new_homography is not None
-                and inlier_mask is not None
-            ):
-                current_homography = new_homography
-                inlier_count = int(inlier_mask.sum())
-
-                # Keep only the points that survived optical flow.
-                previous_screen_points = (
-                    valid_screen_points
-                )
-
-                active_field_points = (
-                    valid_field_points
-                )
-
-                previous_gray = current_gray
-            else:
-                valid_count = 0
-
-        confidence = get_confidence(
-            valid_count,
-            inlier_count,
-        )
+            status = "LOW"
 
         output_frame = draw_field_grid(
             current_frame,
@@ -239,28 +227,32 @@ def main(arguments=None):
             current_homography,
         )
 
-        if valid_count >= 4:
-            output_frame = draw_calibration_points(
-                output_frame,
-                previous_screen_points,
-            )
-
         output_frame = draw_tracking_status(
             output_frame,
             frame_index,
-            valid_count,
-            confidence,
+            feature_count,
+            status,
         )
 
         writer.write(output_frame)
+        diagnostics.append(
+            {
+                "frame": frame_index,
+                "features": feature_count,
+                "inliers": inlier_count,
+                "mean_alignment_error": (
+                    round(alignment_error, 3)
+                    if alignment_error is not None
+                    else ""
+                ),
+                "status": status,
+            }
+        )
 
-        # The first prototype cannot recover after fewer than
-        # four calibration points remain.
-        if valid_count < 4:
+        if camera_motion is None or inlier_count < MINIMUM_FEATURE_INLIERS:
             print(
-                f"Tracking lost at frame {frame_index}. "
-                "The last valid homography will no longer "
-                "be updated."
+                f"Tracking lost at frame {frame_index}: "
+                f"{inlier_count} feature inliers remained."
             )
 
             break
@@ -269,7 +261,10 @@ def main(arguments=None):
     writer.release()
     cv2.destroyAllWindows()
 
+    diagnostics_path = args.output.with_suffix(".csv")
+    write_tracking_diagnostics(diagnostics_path, diagnostics)
     print(f"Saved tracked video to: {args.output}")
+    print(f"Saved tracking diagnostics to: {diagnostics_path}")
 
 
 if __name__ == "__main__":

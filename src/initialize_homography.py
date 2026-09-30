@@ -23,6 +23,8 @@ from src.visualization import (
 INPUT_PATH = Path("data/input/gameplay3.mp4")
 
 OUTPUT_DIRECTORY = Path("data/output")
+MINIMUM_CALIBRATION_INLIERS = 5
+MAXIMUM_AVERAGE_REPROJECTION_ERROR = 3.0
 
 
 def build_argument_parser():
@@ -82,6 +84,28 @@ def calculate_reprojection_error(
     )
 
     return errors
+
+
+def validate_calibration_quality(inlier_mask, errors):
+    """Reject weak initialization before it can produce a misleading grid."""
+
+    inlier_count = int(inlier_mask.sum())
+
+    if inlier_count < MINIMUM_CALIBRATION_INLIERS:
+        raise ValueError(
+            "Initialization rejected: at least "
+            f"{MINIMUM_CALIBRATION_INLIERS} inliers are required, "
+            f"but only {inlier_count} were found."
+        )
+
+    average_error = float(errors.mean())
+
+    if average_error > MAXIMUM_AVERAGE_REPROJECTION_ERROR:
+        raise ValueError(
+            "Initialization rejected: average reprojection error "
+            f"was {average_error:.2f} pixels, which exceeds "
+            f"{MAXIMUM_AVERAGE_REPROJECTION_ERROR:.2f} pixels."
+        )
 
 
 def main(arguments=None):
@@ -156,6 +180,8 @@ def main(arguments=None):
         screen_points,
         homography,
     )
+
+    validate_calibration_quality(inlier_mask, errors)
 
     inlier_count = int(inlier_mask.sum())
     total_count = len(field_points)
