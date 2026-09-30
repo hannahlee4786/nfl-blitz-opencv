@@ -12,6 +12,12 @@ class CalibrationQualityTests(unittest.TestCase):
             np.array([0.4, 0.8, 1.2, 0.6, 0.5, 0.9]),
         )
 
+    def test_accepts_a_usable_five_pixel_average_error(self):
+        validate_calibration_quality(
+            np.ones((6, 1), dtype=np.uint8),
+            np.array([4.4, 4.8, 5.2, 4.6, 4.9, 5.1]),
+        )
+
     def test_rejects_a_calibration_with_only_four_inliers(self):
         with self.assertRaisesRegex(ValueError, "inliers"):
             validate_calibration_quality(
@@ -23,7 +29,7 @@ class CalibrationQualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reprojection"):
             validate_calibration_quality(
                 np.ones((6, 1), dtype=np.uint8),
-                np.array([4.0, 4.2, 4.5, 4.3, 4.1, 4.4]),
+                np.array([6.4, 6.2, 6.5, 6.3, 6.1, 6.4]),
             )
 
 

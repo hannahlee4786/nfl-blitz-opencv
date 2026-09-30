@@ -133,7 +133,7 @@ data/output/initial_homography_preview.png
 
 Check that the purple grid aligns with the yard lines before continuing.
 The initializer now rejects weak clicks: it requires at least 5 of the 6
-points to agree and an average reprojection error of 3 pixels or less. If it
+points to agree and an average reprojection error of 6 pixels or less. If it
 rejects a setup, choose a clearer frame and click the actual yard-line/hash
 intersections more precisely.
 

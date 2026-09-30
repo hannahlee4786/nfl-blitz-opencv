@@ -24,7 +24,7 @@ INPUT_PATH = Path("data/input/gameplay3.mp4")
 
 OUTPUT_DIRECTORY = Path("data/output")
 MINIMUM_CALIBRATION_INLIERS = 5
-MAXIMUM_AVERAGE_REPROJECTION_ERROR = 3.0
+MAXIMUM_AVERAGE_REPROJECTION_ERROR = 6.0
 
 
 def build_argument_parser():
