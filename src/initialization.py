@@ -3,6 +3,53 @@ import cv2
 import numpy as np
 
 
+INSTRUCTION_PANEL_HEIGHT = 82
+
+
+def add_instruction_panel(frame, primary_text, secondary_text):
+    """Place instructions above a frame without covering selectable pixels."""
+
+    height, width = frame.shape[:2]
+    display = np.zeros(
+        (height + INSTRUCTION_PANEL_HEIGHT, width, 3),
+        dtype=np.uint8,
+    )
+    display[INSTRUCTION_PANEL_HEIGHT:] = frame
+
+    cv2.putText(
+        display,
+        primary_text,
+        (15, 32),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+    )
+    cv2.putText(
+        display,
+        secondary_text,
+        (15, 64),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (200, 200, 200),
+        1,
+    )
+
+    return display
+
+
+def display_to_original_point(display_x, display_y, display_scale):
+    """Map a click below the instruction panel into source-frame pixels."""
+
+    if display_y < INSTRUCTION_PANEL_HEIGHT:
+        return None
+
+    return (
+        display_x / display_scale,
+        (display_y - INSTRUCTION_PANEL_HEIGHT) / display_scale,
+    )
+
+
 def move_frame_index(current_index, offset, frame_count):
     """Move to another video frame without leaving valid frame bounds."""
 
@@ -54,7 +101,7 @@ def select_initialization_frame(capture, initial_index=0):
             display_scale = min(
                 1.0,
                 1100 / original_width,
-                800 / original_height,
+                (800 - INSTRUCTION_PANEL_HEIGHT) / original_height,
             )
             display = cv2.resize(
                 frame,
@@ -64,30 +111,10 @@ def select_initialization_frame(capture, initial_index=0):
                 ),
             )
 
-            cv2.rectangle(
-                display,
-                (0, 0),
-                (display.shape[1], 82),
-                (0, 0, 0),
-                -1,
-            )
-            cv2.putText(
+            display = add_instruction_panel(
                 display,
                 f"Frame {frame_index}/{frame_count - 1}",
-                (15, 32),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2,
-            )
-            cv2.putText(
-                display,
                 "A/D: 1 frame | [ / ]: 1 second | ENTER: select | ESC: cancel",
-                (15, 64),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (200, 200, 200),
-                1,
             )
             cv2.imshow(window_name, display)
 
@@ -124,7 +151,7 @@ def select_screen_points(frame, calibration_points):
     display_scale = min(
         1.0,
         1100 / original_width,
-        800 / original_height,
+        (800 - INSTRUCTION_PANEL_HEIGHT) / original_height,
     )
 
     display_width = int(original_width * display_scale)
@@ -174,35 +201,11 @@ def select_screen_points(frame, calibration_points):
         else:
             instruction = "All points selected. Press ENTER to continue."
 
-        cv2.rectangle(
-            display,
-            (0, 0),
-            (display_width, 80),
-            (0, 0, 0),
-            -1,
-        )
-
-        cv2.putText(
+        return add_instruction_panel(
             display,
             instruction,
-            (15, 32),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-        )
-
-        cv2.putText(
-            display,
             "U = undo | R = reset | ESC = cancel",
-            (15, 62),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (200, 200, 200),
-            1,
         )
-
-        return display
 
     def mouse_callback(event, display_x, display_y, flags, parameter):
         if event != cv2.EVENT_LBUTTONDOWN:
@@ -211,13 +214,16 @@ def select_screen_points(frame, calibration_points):
         if len(selected_points) >= len(calibration_points):
             return
 
-        # Convert the displayed location back into original-frame pixels.
-        original_x = display_x / display_scale
-        original_y = display_y / display_scale
-
-        selected_points.append(
-            (original_x, original_y)
+        original_point = display_to_original_point(
+            display_x,
+            display_y,
+            display_scale,
         )
+
+        if original_point is None:
+            return
+
+        selected_points.append(original_point)
 
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
