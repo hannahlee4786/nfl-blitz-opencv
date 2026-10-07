@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "input": "../../cropped_clip_3.mp4",
+  "anchor": "../annotations/clip3-anchor.json",
+  "window_size": 45,
+  "window_overlap": 15,
+  "hud_rectangles": [
+    [0.03, 0.02, 0.25, 0.17],
+    [0.13, 0.78, 0.88, 0.96]
+  ]
+}
