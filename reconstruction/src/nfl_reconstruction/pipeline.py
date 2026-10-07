@@ -24,6 +24,12 @@ def _stage_hash(config_bytes: bytes, stage: str) -> str:
     digest.update(config_bytes)
     digest.update(b"\0")
     digest.update(stage.encode("utf-8"))
+    digest.update(b"\0")
+    package_dir = Path(__file__).parent
+    for source in sorted(package_dir.glob("*.py")):
+        digest.update(source.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source.read_bytes())
     return digest.hexdigest()
 
 

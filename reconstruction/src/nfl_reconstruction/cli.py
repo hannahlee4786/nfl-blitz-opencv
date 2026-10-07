@@ -9,7 +9,6 @@ import tempfile
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage
 import typer
 
 from .annotations import anchor_homography, load_anchor
@@ -18,6 +17,7 @@ from .evaluation import evaluate_run
 from .evidence import build_exclusion_mask, field_evidence
 from .field import NFLField
 from .mosaic import build_mosaic
+from .motion import estimate_frame_motion
 from .pipeline import run_pipeline
 from .schemas import (
     CameraFrame,
@@ -29,7 +29,7 @@ from .schemas import (
 )
 from .tracking import track_players
 from .video import build_manifest, probe_video
-from .visualization import render_overlay
+from .visualization import render_minimap, render_overlay
 
 app = typer.Typer(help="Reconstruct a static NFL field from a moving-camera clip.")
 
@@ -59,29 +59,6 @@ def _read_jsonl(path: Path, model):
 
 def _write_jsonl(path: Path, records) -> None:
     path.write_text("".join(record.model_dump_json() + "\n" for record in records))
-
-
-def _phase_motion(previous: np.ndarray, current: np.ndarray, excluded: np.ndarray):
-    """Return the image translation from previous to current using phase correlation."""
-
-    def signal(frame):
-        gray = frame.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
-        edges = np.hypot(ndimage.sobel(gray, axis=0), ndimage.sobel(gray, axis=1))
-        edges[excluded] = 0
-        window = np.outer(np.hanning(edges.shape[0]), np.hanning(edges.shape[1]))
-        return (edges - edges.mean()) * window
-
-    first, second = signal(previous), signal(current)
-    cross = np.fft.fft2(first) * np.conj(np.fft.fft2(second))
-    cross /= np.maximum(np.abs(cross), 1e-9)
-    correlation = np.abs(np.fft.ifft2(cross))
-    peak = np.unravel_index(np.argmax(correlation), correlation.shape)
-    shift = np.asarray(peak, dtype=float)
-    dimensions = np.asarray(correlation.shape)
-    shift[shift > dimensions / 2] -= dimensions[shift > dimensions / 2]
-    response = float(correlation[peak] / max(correlation.mean(), 1e-9))
-    # Phase correlation returns the shift applied to current to align it to previous.
-    return float(-shift[1]), float(-shift[0]), response
 
 
 def _project(points: np.ndarray, homography: np.ndarray) -> np.ndarray:
@@ -127,14 +104,9 @@ class ReconstructionRunner:
 
         rectangles = [tuple(item) for item in config.get("hud_rectangles", [])]
         excluded = build_exclusion_mask(image_size, rectangles)
-        cumulative = [(0.0, 0.0)]
-        responses = [math.inf]
-        for previous, current in zip(frames, frames[1:]):
-            dx, dy, response = _phase_motion(previous, current, excluded)
-            old_x, old_y = cumulative[-1]
-            cumulative.append((old_x + dx, old_y + dy))
-            responses.append(response)
-        anchor_position = cumulative[indices.index(anchor.frame)]
+        relative_motion, motion_quality = estimate_frame_motion(
+            frames, excluded, indices.index(anchor.frame)
+        )
         base_homography = anchor_homography(anchor)
         anchor_field = np.asarray([(point.x, point.y) for point in anchor.field_points])
         anchor_image = np.asarray([(point.x, point.y) for point in anchor.image_points])
@@ -152,13 +124,10 @@ class ReconstructionRunner:
             focal_px=720.0,
         )
         camera_records = []
-        for position, response, index, frame in zip(
-            cumulative, responses, indices, frames, strict=True
+        for motion, quality, index, frame in zip(
+            relative_motion, motion_quality, indices, frames, strict=True
         ):
-            dx = position[0] - anchor_position[0]
-            dy = position[1] - anchor_position[1]
-            transform = np.array(((1.0, 0.0, dx), (0.0, 1.0, dy), (0.0, 0.0, 1.0)))
-            homography = transform @ base_homography
+            homography = motion @ base_homography
             evidence = field_evidence(frame, excluded)
             pixels = _project(samples, homography)
             rounded = np.rint(pixels).astype(int)
@@ -171,7 +140,7 @@ class ReconstructionRunner:
             )
             error = float(np.median(evidence.distance[rounded[valid, 1], rounded[valid, 0]])) if valid.any() else float(max(image_size))
             confidence = 1.0 if index == anchor.frame else float(
-                np.clip(math.exp(-error / 8.0) * min(1.0, response / 15.0), 0.0, 1.0)
+                np.clip(math.sqrt(quality * math.exp(-error / 20.0)), 0.0, 1.0)
             )
             camera_records.append(
                 CameraFrame(
@@ -189,7 +158,7 @@ class ReconstructionRunner:
             json.dumps(
                 {
                     "seed_anchor_reprojection_error_px": anchor_error,
-                    "motion_model": "phase-correlation translation composed with manual homography",
+                    "motion_model": "Kornia SIFT/RANSAC projective motion with phase-correlation fallback",
                     "reliable": sum(record.status == "reliable" for record in camera_records),
                     "uncertain": sum(record.status == "uncertain" for record in camera_records),
                 },
@@ -226,6 +195,24 @@ class ReconstructionRunner:
         Image.fromarray(result.image).save(output_dir / "mosaic.png")
         overlay = render_overlay(frames[0], NFLField.standard(), cameras[0], [], [])
         Image.fromarray(overlay).save(output_dir / "overlay.png")
+        sample_indices = sorted({0, len(frames) // 3, 2 * len(frames) // 3, len(frames) - 1})
+        tiles = []
+        for sample_index in sample_indices:
+            rendered = render_overlay(
+                frames[sample_index],
+                NFLField.standard(),
+                cameras[sample_index],
+                [],
+                [],
+            )
+            tile = Image.fromarray(rendered).resize((432, 307))
+            tiles.append(tile)
+        contact_sheet = Image.new("RGB", (864, 614))
+        for tile_index, tile in enumerate(tiles):
+            contact_sheet.paste(tile, ((tile_index % 2) * 432, (tile_index // 2) * 307))
+        contact_sheet.save(output_dir / "overlay-contact-sheet.png")
+        minimap = render_minimap(NFLField.standard(), [])
+        Image.fromarray(minimap).save(output_dir / "minimap.png")
         report = evaluate_run(cameras, [])
         summary = report.model_dump()
         summary["coverage_fraction"] = float(result.coverage.mean())
@@ -273,6 +260,7 @@ def _execute(
     stage_names: list[str],
     frame_range: str | None,
     input_path: Path | None,
+    weights: Path | None = None,
 ):
     payload = json.loads(config_path.read_text())
     source = input_path.resolve() if input_path else _resolve(config_path, payload["input"])
@@ -293,6 +281,15 @@ def _execute(
         "frame_range": [selected.start, selected.stop],
         "stages": stage_names,
     }
+    configured_weights = weights or (
+        _resolve(config_path, payload["weights"]) if payload.get("weights") else None
+    )
+    if configured_weights is not None:
+        resolved["weights"] = str(configured_weights.resolve())
+    if "detect" in stage_names and configured_weights is None:
+        raise typer.BadParameter(
+            "detect requires --weights or a weights path in the run config"
+        )
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as temporary:
         json.dump(resolved, temporary, sort_keys=True)
         resolved_path = Path(temporary.name)
@@ -312,6 +309,9 @@ def run_command(
     ),
     frame_range: str | None = typer.Option(None, help="Half-open frame range START:END."),
     input_path: Path | None = typer.Option(None, "--input", help="Override input video path."),
+    weights: Path | None = typer.Option(
+        None, exists=True, dir_okay=False, help="Detector weights for the detect stage."
+    ),
     dry_run: bool = typer.Option(False, help="Resolve and validate without writing."),
 ) -> None:
     """Run prepare, camera, mosaic, detect, track, and/or evaluate stages."""
@@ -335,10 +335,25 @@ def run_command(
         typer.echo(f"frames={selected.start}:{selected.stop}")
         typer.echo(f"stages={','.join(stage_names)}")
         return
-    manifest = _execute(config, run_dir, stage_names, frame_range, input_path)
+    manifest = _execute(config, run_dir, stage_names, frame_range, input_path, weights)
     for name in stage_names:
         record = manifest.stages[name]
         typer.echo(f"{name}: {record.status} -> {record.output_path}")
+    camera_summary = run_dir / "camera" / "camera-summary.json"
+    if "camera" in stage_names and camera_summary.exists():
+        summary = json.loads(camera_summary.read_text())
+        camera_records = _read_jsonl(run_dir / "camera" / "camera.jsonl", CameraFrame)
+        typer.echo(
+            "camera frames: "
+            f"reliable={summary['reliable']} "
+            f"uncertain={summary['uncertain']} "
+            f"missing={sum(record.status == 'missing' for record in camera_records)}"
+        )
+    mosaic_evaluation = run_dir / "mosaic" / "evaluation.json"
+    if "mosaic" in stage_names and mosaic_evaluation.exists():
+        temporary = run_dir / ".evaluation.json.tmp"
+        temporary.write_text(mosaic_evaluation.read_text())
+        temporary.replace(run_dir / "evaluation.json")
 
 
 def _single_stage(name: str, config: Path, run_dir: Path, frame_range: str | None):

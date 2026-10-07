@@ -45,10 +45,18 @@ def evaluate_run(
     ordered = sorted(camera_frames, key=lambda frame: frame.frame)
     smoothness = None
     if len(ordered) >= 3:
-        targets = np.asarray(
-            [(frame.state.target_x, frame.state.target_y) for frame in ordered]
-        )
-        acceleration = np.diff(targets, n=2, axis=0)
+        if all(frame.homography is not None for frame in ordered):
+            field_center = np.asarray([60.0, 26.6665, 1.0])
+            positions = []
+            for frame in ordered:
+                projected = np.asarray(frame.homography) @ field_center
+                positions.append(projected[:2] / projected[2])
+            trajectory = np.asarray(positions)
+        else:
+            trajectory = np.asarray(
+                [(frame.state.target_x, frame.state.target_y) for frame in ordered]
+            )
+        acceleration = np.diff(trajectory, n=2, axis=0)
         smoothness = float(np.mean(np.linalg.norm(acceleration, axis=1)))
 
     recall = None

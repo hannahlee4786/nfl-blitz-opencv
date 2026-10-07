@@ -32,9 +32,10 @@ manifest, decoded frames, camera JSONL, camera summary, static-field mosaic,
 projected-field overlay, and evaluation JSON. Repeating an identical command
 reuses completed stages.
 
-The current camera bootstrap composes a manual field-to-image homography with
-phase-correlation translation recovered directly from consecutive RGB frames;
-it does not call the existing OpenCV pipeline. Low-confidence frames are marked
+The camera bootstrap composes a manual field-to-image homography with projective
+motion recovered by Kornia SIFT matching and RANSAC directly from consecutive
+RGB frames. Phase correlation is used only when projective matching fails. It
+does not call the existing OpenCV pipeline. Low-confidence frames are marked
 uncertain and excluded from the mosaic.
 
 ## Player flow
