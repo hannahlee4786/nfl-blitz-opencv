@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -32,6 +33,20 @@ FEATURE_SPACING = 12
 # How far, in pixels, a point may be from where the homography places
 # it before RANSAC treats it as an outlier.
 RANSAC_THRESHOLD = 3.0
+
+
+@dataclass
+class FieldState:
+    """Everything the field tracker knows about one frame."""
+
+    frame_index: int
+    frame: np.ndarray
+    homography: np.ndarray  # field -> screen
+    screen_points: np.ndarray
+    point_count: int
+    confidence: str
+    fps: float
+    size: tuple  # (width, height)
 
 
 def get_confidence(tracked_count, inlier_count):
@@ -132,7 +147,29 @@ def draw_output_frame(
     )
 
 
-def track_video(input_path, initialization_path, output_path):
+def create_writer(output_path, fps, size):
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        size,
+    )
+
+    if not writer.isOpened():
+        raise RuntimeError(
+            f"Could not create output: {output_path}"
+        )
+
+    return writer
+
+
+def track_field(input_path, initialization_path):
+    """
+    Generator that runs the field tracker and yields one FieldState per
+    frame, starting at the calibration frame. Other stages (such as
+    player tracking) consume this instead of re-running field tracking.
+    """
+
     initialization = np.load(initialization_path)
 
     current_homography = initialization[
@@ -150,167 +187,183 @@ def track_video(input_path, initialization_path, output_path):
             f"Could not open video: {input_path}"
         )
 
-    width = int(
-        capture.get(cv2.CAP_PROP_FRAME_WIDTH)
-    )
-
-    height = int(
-        capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    )
-
-    fps = capture.get(cv2.CAP_PROP_FPS)
-
-    capture.set(
-        cv2.CAP_PROP_POS_FRAMES,
-        initial_frame_index,
-    )
-
-    success, previous_frame = capture.read()
-
-    if not success:
-        raise RuntimeError(
-            "Could not read the initialization frame."
+    try:
+        width = int(
+            capture.get(cv2.CAP_PROP_FRAME_WIDTH)
         )
 
-    writer = cv2.VideoWriter(
-        str(output_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height),
-    )
-
-    if not writer.isOpened():
-        raise RuntimeError(
-            f"Could not create output: {output_path}"
+        height = int(
+            capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
         )
 
-    previous_gray = cv2.cvtColor(
-        previous_frame,
-        cv2.COLOR_BGR2GRAY,
-    )
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        size = (width, height)
 
-    screen_points, field_points = detect_new_points(
-        previous_gray,
-        create_feature_mask(previous_frame, []),
-        current_homography,
-        MAX_FEATURES,
-    )
-
-    frame_index = initial_frame_index
-    low_confidence_frames = 0
-
-    writer.write(
-        draw_output_frame(
-            previous_frame,
-            current_homography,
-            screen_points,
-            frame_index,
-            len(screen_points),
-            "HIGH",
+        capture.set(
+            cv2.CAP_PROP_POS_FRAMES,
+            initial_frame_index,
         )
-    )
 
-    while True:
-        success, current_frame = capture.read()
+        success, previous_frame = capture.read()
 
         if not success:
-            break
+            raise RuntimeError(
+                "Could not read the initialization frame."
+            )
 
-        frame_index += 1
-
-        current_gray = cv2.cvtColor(
-            current_frame,
+        previous_gray = cv2.cvtColor(
+            previous_frame,
             cv2.COLOR_BGR2GRAY,
         )
 
-        valid_count = 0
-        inlier_count = 0
-
-        if len(screen_points) > 0:
-            (
-                candidate_screen_points,
-                valid_mask,
-                tracking_errors,
-            ) = track_screen_points(
-                previous_gray,
-                current_gray,
-                screen_points,
-            )
-
-            if candidate_screen_points is not None:
-                valid_count = int(valid_mask.sum())
-
-        if valid_count >= 4:
-            valid_screen_points = (
-                candidate_screen_points[valid_mask]
-            ).astype(np.float32)
-
-            valid_field_points = field_points[valid_mask]
-
-            new_homography, inlier_mask = cv2.findHomography(
-                valid_field_points,
-                valid_screen_points,
-                cv2.RANSAC,
-                RANSAC_THRESHOLD,
-            )
-
-            if new_homography is not None:
-                current_homography = new_homography
-                inliers = inlier_mask.reshape(-1).astype(bool)
-                inlier_count = int(inliers.sum())
-
-                # Drop points that no longer agree with the field,
-                # such as ones dragged along by a player.
-                screen_points = valid_screen_points[inliers]
-                field_points = valid_field_points[inliers]
-            else:
-                valid_count = 0
-
-        if valid_count < 4:
-            # Keep the last homography and start over with fresh points.
-            screen_points = np.empty((0, 2), dtype=np.float32)
-            field_points = np.empty((0, 2), dtype=np.float32)
-
-        # Top up with new points as old ones are lost.
-        if len(screen_points) < MIN_FEATURES:
-            new_screen_points, new_field_points = detect_new_points(
-                current_gray,
-                create_feature_mask(current_frame, screen_points),
-                current_homography,
-                MAX_FEATURES - len(screen_points),
-            )
-
-            screen_points = np.vstack(
-                [screen_points, new_screen_points]
-            )
-
-            field_points = np.vstack(
-                [field_points, new_field_points]
-            )
-
-        confidence = get_confidence(
-            valid_count,
-            inlier_count,
+        screen_points, field_points = detect_new_points(
+            previous_gray,
+            create_feature_mask(previous_frame, []),
+            current_homography,
+            MAX_FEATURES,
         )
 
-        if confidence == "LOW":
-            low_confidence_frames += 1
+        frame_index = initial_frame_index
 
-        writer.write(
-            draw_output_frame(
+        yield FieldState(
+            frame_index,
+            previous_frame,
+            current_homography,
+            screen_points,
+            len(screen_points),
+            "HIGH",
+            fps,
+            size,
+        )
+
+        while True:
+            success, current_frame = capture.read()
+
+            if not success:
+                break
+
+            frame_index += 1
+
+            current_gray = cv2.cvtColor(
+                current_frame,
+                cv2.COLOR_BGR2GRAY,
+            )
+
+            valid_count = 0
+            inlier_count = 0
+
+            if len(screen_points) > 0:
+                (
+                    candidate_screen_points,
+                    valid_mask,
+                    tracking_errors,
+                ) = track_screen_points(
+                    previous_gray,
+                    current_gray,
+                    screen_points,
+                )
+
+                if candidate_screen_points is not None:
+                    valid_count = int(valid_mask.sum())
+
+            if valid_count >= 4:
+                valid_screen_points = (
+                    candidate_screen_points[valid_mask]
+                ).astype(np.float32)
+
+                valid_field_points = field_points[valid_mask]
+
+                new_homography, inlier_mask = cv2.findHomography(
+                    valid_field_points,
+                    valid_screen_points,
+                    cv2.RANSAC,
+                    RANSAC_THRESHOLD,
+                )
+
+                if new_homography is not None:
+                    current_homography = new_homography
+                    inliers = inlier_mask.reshape(-1).astype(bool)
+                    inlier_count = int(inliers.sum())
+
+                    # Drop points that no longer agree with the field,
+                    # such as ones dragged along by a player.
+                    screen_points = valid_screen_points[inliers]
+                    field_points = valid_field_points[inliers]
+                else:
+                    valid_count = 0
+
+            if valid_count < 4:
+                # Keep the last homography and start over with fresh points.
+                screen_points = np.empty((0, 2), dtype=np.float32)
+                field_points = np.empty((0, 2), dtype=np.float32)
+
+            # Top up with new points as old ones are lost.
+            if len(screen_points) < MIN_FEATURES:
+                new_screen_points, new_field_points = detect_new_points(
+                    current_gray,
+                    create_feature_mask(current_frame, screen_points),
+                    current_homography,
+                    MAX_FEATURES - len(screen_points),
+                )
+
+                screen_points = np.vstack(
+                    [screen_points, new_screen_points]
+                )
+
+                field_points = np.vstack(
+                    [field_points, new_field_points]
+                )
+
+            confidence = get_confidence(
+                valid_count,
+                inlier_count,
+            )
+
+            yield FieldState(
+                frame_index,
                 current_frame,
                 current_homography,
                 screen_points,
-                frame_index,
                 inlier_count,
                 confidence,
+                fps,
+                size,
             )
-        )
 
-        previous_gray = current_gray
+            previous_gray = current_gray
+    finally:
+        capture.release()
 
-    capture.release()
-    writer.release()
+
+def track_video(input_path, initialization_path, output_path):
+    writer = None
+    low_confidence_frames = 0
+
+    try:
+        for state in track_field(input_path, initialization_path):
+            if writer is None:
+                writer = create_writer(
+                    output_path,
+                    state.fps,
+                    state.size,
+                )
+
+            if state.confidence == "LOW":
+                low_confidence_frames += 1
+
+            writer.write(
+                draw_output_frame(
+                    state.frame,
+                    state.homography,
+                    state.screen_points,
+                    state.frame_index,
+                    state.point_count,
+                    state.confidence,
+                )
+            )
+    finally:
+        if writer is not None:
+            writer.release()
 
     print(f"Frames with LOW confidence: {low_confidence_frames}")
     print(f"Saved tracked video to: {output_path}")

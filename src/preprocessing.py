@@ -2,15 +2,39 @@
 import cv2
 import numpy as np
 
-def preprocess_frame(frame):
-  height, width = frame.shape[:2]
+LOWER_GREEN = np.array([25, 30, 30])
+UPPER_GREEN = np.array([100, 255, 255])
 
+
+def get_hud_rectangles(width, height):
+  # Regions covered by the scoreboard, the temporary message, and the
+  # bottom HUD, as (top_left, bottom_right) pairs.
+  return [
+    ((0, 0), (int(width * 0.20), int(height * 0.18))),
+    ((int(width * 0.40), 0), (int(width * 0.88), int(height * 0.27))),
+    ((0, int(height * 0.78)), (width, height)),
+  ]
+
+
+def create_hud_mask(shape):
+  # 255 where the HUD is, 0 elsewhere.
+  height, width = shape[:2]
+  mask = np.zeros((height, width), np.uint8)
+
+  for top_left, bottom_right in get_hud_rectangles(width, height):
+    cv2.rectangle(mask, top_left, bottom_right, 255, -1)
+
+  return mask
+
+
+def create_green_mask(hsv):
+  return cv2.inRange(hsv, LOWER_GREEN, UPPER_GREEN)
+
+
+def preprocess_frame(frame):
   hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-  lower_green = np.array([25, 30, 30])
-  upper_green = np.array([100, 255, 255])
-
-  green_mask = cv2.inRange(hsv, lower_green, upper_green)
+  green_mask = create_green_mask(hsv)
 
   # Painted lines are white, not green. Include them so their edges
   # sit inside the mask instead of on its border.
@@ -21,32 +45,8 @@ def preprocess_frame(frame):
 
   field_mask = cv2.bitwise_or(green_mask, white_mask)
 
-  # Remove the small scoreboard in the upper-left corner.
-  cv2.rectangle(
-    field_mask,
-    (0, 0),
-    (int(width * 0.20), int(height * 0.18)),
-    0,
-    -1,
-  )
-
-  # Remove the large temporary message near the top-center.
-  cv2.rectangle(
-    field_mask,
-    (int(width * 0.40), 0),
-    (int(width * 0.88), int(height * 0.27)),
-    0,
-    -1,
-  )
-
-  # Remove the bottom HUD.
-  cv2.rectangle(
-    field_mask,
-    (0, int(height * 0.78)),
-    (width, height),
-    0,
-    -1,
-  )
+  # Remove the scoreboard, the temporary message, and the bottom HUD.
+  field_mask[create_hud_mask(frame.shape) > 0] = 0
 
   gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
   blurred = cv2.GaussianBlur(gray, (5, 5), 0)
