@@ -65,10 +65,13 @@ def field_evidence(
     )
     saturation = rgb.max(axis=2) - rgb.min(axis=2)
     brightness = rgb.max(axis=2)
-    line_raw = brightness * np.clip(1.0 - saturation, 0.0, 1.0)
+    line_raw = (
+        np.clip((brightness - 0.55) / 0.45, 0.0, 1.0)
+        * np.clip(1.0 - saturation, 0.0, 1.0)
+    )
     valid = ~exclusion_mask
     gradient = _normalize(gradient_raw, valid)
-    line_likelihood = _normalize(line_raw, valid)
+    line_likelihood = line_raw.astype(np.float32)
     gradient[exclusion_mask] = 0
     line_likelihood[exclusion_mask] = 0
     distance = ndimage.distance_transform_edt(line_likelihood < 0.25).astype(
@@ -76,4 +79,3 @@ def field_evidence(
     )
     distance[exclusion_mask] = float(max(frame.shape[:2]))
     return EvidenceMap(gradient, line_likelihood, distance, exclusion_mask.copy())
-

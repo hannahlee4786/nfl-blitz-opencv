@@ -34,3 +34,10 @@ def test_field_evidence_removes_excluded_bright_line():
     assert evidence.line_likelihood[10, 16:].sum() > 0
     assert evidence.distance.shape == (20, 30)
 
+
+def test_dark_uniform_field_has_no_line_evidence():
+    frame = np.full((20, 30, 3), (30, 100, 65), dtype=np.uint8)
+
+    evidence = field_evidence(frame, np.zeros((20, 30), dtype=bool))
+
+    assert evidence.line_likelihood.max() == 0

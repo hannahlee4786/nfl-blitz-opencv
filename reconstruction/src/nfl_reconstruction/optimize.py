@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+import numpy as np
 import torch
 
-from .camera import camera_visibility, project_field
+from .camera import camera_visibility, field_homography, project_field
+from .evidence import EvidenceMap
 from .field import NFLField
-from .schemas import AnchorSet, CameraState
+from .schemas import AnchorSet, CameraFrame, CameraState
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,14 @@ class CameraFit:
     mean_reprojection_error_px: float
     confidence: float
     losses: dict[str, float]
+
+
+@dataclass(frozen=True)
+class SequenceFitConfig:
+    window_size: int = 45
+    overlap: int = 15
+    confidence_threshold: float = 0.25
+    steps_per_frame: int = 60
 
 
 def camera_confidence(losses: dict[str, float], visibility: float) -> float:
@@ -104,3 +114,115 @@ def fit_anchor_camera(
         confidence=camera_confidence(losses, visibility),
         losses=losses,
     )
+
+
+def _interpolate_state(
+    frame: int,
+    anchors: dict[int, CameraState],
+) -> tuple[CameraState, int]:
+    indices = sorted(anchors)
+    if not indices:
+        raise ValueError("Camera sequence fitting requires at least one anchor.")
+    before = max((index for index in indices if index <= frame), default=indices[0])
+    after = min((index for index in indices if index >= frame), default=indices[-1])
+    if before == after:
+        return anchors[before], before
+    ratio = (frame - before) / (after - before)
+    values = {}
+    for name in (
+        "target_x", "target_y", "distance", "yaw_degrees",
+        "pitch_degrees", "focal_px", "roll_degrees",
+    ):
+        start = getattr(anchors[before], name)
+        end = getattr(anchors[after], name)
+        values[name] = start + ratio * (end - start)
+    nearest = before if frame - before <= after - frame else after
+    return CameraState(**values), nearest
+
+
+def _marking_samples(field: NFLField) -> torch.Tensor:
+    points = []
+    for start, end in field.marking_segments():
+        points.extend(np.linspace(start, end, 80))
+    return torch.tensor(np.asarray(points), dtype=torch.float64)
+
+
+def _evidence_error(
+    evidence: EvidenceMap,
+    state: CameraState,
+) -> tuple[float, float]:
+    height, width = evidence.distance.shape
+    if evidence.line_likelihood.max() <= 0:
+        return float(max(width, height)), 0.0
+    pixels = project_field(
+        _marking_samples(NFLField.standard()), state, (width, height)
+    ).detach().numpy()
+    rounded = np.rint(pixels).astype(int)
+    valid = (
+        np.isfinite(pixels).all(axis=1)
+        & (rounded[:, 0] >= 0)
+        & (rounded[:, 0] < width)
+        & (rounded[:, 1] >= 0)
+        & (rounded[:, 1] < height)
+    )
+    if valid.sum() < 4:
+        return float(max(width, height)), 0.0
+    error = float(
+        np.median(evidence.distance[rounded[valid, 1], rounded[valid, 0]])
+    )
+    confidence = math.exp(-error / 5.0)
+    return error, confidence
+
+
+def merge_window_results(
+    windows: list[list[CameraFrame]],
+    overlap: int,
+) -> list[CameraFrame]:
+    del overlap
+    by_frame: dict[int, list[CameraFrame]] = {}
+    for window in windows:
+        for record in window:
+            by_frame.setdefault(record.frame, []).append(record)
+    merged = []
+    for frame in sorted(by_frame):
+        candidates = by_frame[frame]
+        best = max(candidates, key=lambda item: item.confidence)
+        merged.append(best)
+    return merged
+
+
+def fit_camera_sequence(
+    evidence: list[EvidenceMap],
+    anchors: dict[int, CameraState],
+    config: SequenceFitConfig = SequenceFitConfig(),
+) -> list[CameraFrame]:
+    if config.window_size <= config.overlap:
+        raise ValueError("Camera window size must be greater than overlap.")
+    records = []
+    for frame, frame_evidence in enumerate(evidence):
+        state, anchor_source = _interpolate_state(frame, anchors)
+        error, confidence = _evidence_error(frame_evidence, state)
+        status = (
+            "reliable" if confidence >= config.confidence_threshold else "uncertain"
+        )
+        homography = field_homography(
+            state,
+            (frame_evidence.distance.shape[1], frame_evidence.distance.shape[0]),
+        ).detach().numpy()
+        records.append(
+            CameraFrame(
+                frame=frame,
+                state=state,
+                confidence=confidence,
+                status=status,
+                reprojection_error_px=error,
+                homography=tuple(tuple(float(value) for value in row) for row in homography),
+                anchor_source=anchor_source,
+            )
+        )
+    stride = config.window_size - config.overlap
+    windows = [
+        records[start : start + config.window_size]
+        for start in range(0, len(records), stride)
+    ]
+    return merge_window_results(windows, config.overlap)
