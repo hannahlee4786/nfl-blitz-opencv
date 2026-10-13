@@ -52,6 +52,22 @@ This command tracks the field from the opening frame, then keeps a number on eac
 python pipeline/track_clip4.py --video data/input/gameplay3.mp4 --out-dir data/output
 ```
 
+To add the real team name and jersey-classification confidence to every
+tracked player, pass the JSON calibration created by `src.classify_teams`:
+
+```bash
+python pipeline/track_clip4.py \
+  --video data/input/gameplay3.mp4 \
+  --out-dir data/output \
+  --team-calibration data/output/team_classification.json
+```
+
+The video pipeline does not ask you to select player regions. It uses the
+boxes found by the automatic tracker, takes the upper-torso area of each box,
+and runs the saved team-color classifier on that area for every frame. A label
+such as `4 Tampa 97% | trk 82%` shows the player ID, team classification,
+team confidence, and the separate tracking confidence.
+
 `--anchor` is the yard offset on the reference frame. The default is `-15`, which places the line of scrimmage at the 50 for the clip this pipeline was built on. If your opening frame is a different yard line, set `--anchor` so the reported `x_yd` matches the painted number.
 
 ```bash
@@ -64,9 +80,14 @@ The run writes three things into `--out-dir`:
 
 | File | Contents |
 |---|---|
-| `tracked_players.mp4` | Clip with boxes, player numbers, and confidence |
-| `positions.csv` | `frame,id,team,x_yd,y_yd,conf` |
+| `tracked_players.mp4` | Clip with boxes, player IDs, team names, team confidence, and tracking confidence |
+| `positions.csv` | `frame,id,team,team_name,x_yd,y_yd,track_conf,team_conf,color_coverage` |
 | `homography.npz` | Field homography for each frame, reused on the next run |
 | `frames/` | Still frames from the video |
 
-`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera. `conf` is high when the detection agrees with the position predicted from the previous frame. The first run fits the field, and a later run on the same video reuses `homography.npz`.
+`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera.
+`track_conf` is high when the detection agrees with the position predicted
+from nearby frames. `team_conf` is the agreement among jersey-color pixels,
+and `color_coverage` is the share of usable colorful pixels matching either
+team. The first run fits the field, and a later run on the same video reuses
+`homography.npz`.

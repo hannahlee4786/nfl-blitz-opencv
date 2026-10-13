@@ -22,11 +22,16 @@ import sys
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(PIPELINE_DIR)
+sys.path.insert(0, PIPELINE_DIR)
+sys.path.insert(0, PROJECT_ROOT)
 import field_homography as fh
 from track_clip import (fit_frame, inter_frame_h,
                         TEAM_BGR, STATUS_BGR, LEFT_SCALE, to_map)
 from project_players import detect_players
+from src.team_classifier import (classify_jersey_region, crop_region,
+                                 load_calibration_report)
 
 CLIP = "Clip_4 Camera Swing and Distance Change Test.mp4"
 REF_FRAME = 0
@@ -39,6 +44,7 @@ SAMPLE_AT = {0, 30, 60, 120, 180, 240}
 SAMPLE_DIR = "data/output/frames"
 HOMOGRAPHY_CACHE = "data/output/homography.npz"
 FIELD_MAP = ""
+TEAM_PROTOTYPES = None
 # (x0, x1) of the picture inside black side bars. None until the first frame.
 _CONTENT_X = None
 
@@ -3480,6 +3486,47 @@ def _label(img, text, org, scale):
     cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), 1, cv2.LINE_AA)
 
 
+def _jersey_box(player_box):
+    """Return the upper-torso portion of a full-player tracking box."""
+    x, y, width, height = player_box
+    left = int(round(x + 0.08 * width))
+    top = int(round(y + 0.12 * height))
+    jersey_width = max(1, int(round(0.84 * width)))
+    jersey_height = max(1, int(round(0.50 * height)))
+    return left, top, jersey_width, jersey_height
+
+
+def _with_team_classification(frame, tracks, prototypes):
+    """Add single-frame jersey evidence to already-associated tracks."""
+    if prototypes is None:
+        return tracks
+
+    team_a, team_b = prototypes
+    classified = []
+    for track in tracks:
+        item = dict(track)
+        try:
+            result = classify_jersey_region(
+                crop_region(frame, _jersey_box(track["bbox"])),
+                team_a,
+                team_b,
+            )
+        except ValueError:
+            item.update(
+                team_name="UNKNOWN",
+                team_conf=0.0,
+                color_coverage=0.0,
+            )
+        else:
+            item.update(
+                team_name=result.label,
+                team_conf=result.confidence,
+                color_coverage=result.matched_fraction,
+            )
+        classified.append(item)
+    return classified
+
+
 def render_aligned(frame, tracks, dets, status, field_map):
     """Bird's eye panel facing the same way as the camera.
 
@@ -3500,7 +3547,12 @@ def render_aligned(frame, tracks, dets, status, field_map):
         cv2.circle(left, foot, 5, c, -1)
         if d.get("id") is not None:
             text = str(d["id"])
-            if d.get("conf") is not None:
+            if d.get("team_name") is not None:
+                team_conf = round(100 * d.get("team_conf", 0.0))
+                text = f"{d['id']} {d['team_name']} {team_conf}%"
+                if d.get("conf") is not None:
+                    text += f" | trk {round(100 * d['conf'])}%"
+            elif d.get("conf") is not None:
                 text = f"{d['id']} {d['conf']:.1f}"
             _label(left, text, (x0, max(18, y0 - 6)), 0.6)
     cv2.putText(left, status.upper(), (20, h - 30),
@@ -3876,11 +3928,18 @@ def render_pass(n, A, status):
         ok, frame = _take(cap)
         if not ok:
             break
-        active = tracked[i]
+        active = _with_team_classification(
+            frame, tracked[i], TEAM_PROTOTYPES
+        )
         for tr in active:
             rows.append([i, tr["id"], tr["team"],
+                         tr.get("team_name", ""),
                          round(tr["pos"][0], 2), round(tr["pos"][1], 2),
-                         round(tr["conf"], 2)])
+                         round(tr["conf"], 4),
+                         round(tr["team_conf"], 4)
+                         if "team_conf" in tr else "",
+                         round(tr["color_coverage"], 4)
+                         if "color_coverage" in tr else ""])
         combo = render_aligned(frame, active, active, status[i], field_map)
         if writer is None:
             writer, out_path = make_writer(combo.shape)
@@ -3894,7 +3953,10 @@ def render_pass(n, A, status):
 
     with open(OUT_CSV, "w", newline="") as f:
         wcsv = csv.writer(f)
-        wcsv.writerow(["frame", "id", "team", "x_yd", "y_yd", "conf"])
+        wcsv.writerow([
+            "frame", "id", "team", "team_name", "x_yd", "y_yd",
+            "track_conf", "team_conf", "color_coverage",
+        ])
         wcsv.writerows(rows)
     print(f"wrote {OUT_CSV} ({len(rows)} rows)")
 
@@ -3921,6 +3983,10 @@ if __name__ == "__main__":
                             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "data", "field_map.png"),
                         help="Top-down field image for the vertical map panel.")
+    parser.add_argument(
+        "--team-calibration",
+        help=("JSON report created by src.classify_teams; enables team names "
+              "and jersey-classification confidence in the video and CSV."))
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     CLIP = args.video
@@ -3931,4 +3997,7 @@ if __name__ == "__main__":
     os.makedirs(SAMPLE_DIR, exist_ok=True)
     REF_ANCHOR = args.anchor
     FIELD_MAP = args.field_map
+    if args.team_calibration:
+        TEAM_PROTOTYPES = load_calibration_report(args.team_calibration)
+        print(f"loaded team calibration from {args.team_calibration}")
     main()
