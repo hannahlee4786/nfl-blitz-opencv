@@ -127,3 +127,33 @@ point tracking, and one end-to-end run on a small generated clip.
 - Not ported: the calibration click tool, the camera video, the drift report,
   and the duplicate-frame flag.
 - Player detection still needs 50 to 100 labeled frames and a trained model.
+
+## Preview output
+
+`mosaic.png` is one static median composite of every reliable observation warped
+onto the field. Colored areas were observed by the camera; black areas were not.
+It summarizes coverage and is not a video frame.
+
+`reconstruction-preview.mp4` is the frame-by-frame evaluation output. The left
+side shows the source video with the estimated field grid. The right side shows
+the same frame warped onto fixed field coordinates. If calibration is working,
+the right-side field stays still while the visible coverage changes as the source
+camera pans or zooms. Green labels mark snapped reliable estimates; yellow labels
+mark predicted, filled, uncertain, or missing estimates.
+
+Run the full Clip 3 flow with:
+
+```bash
+cd reconstruction
+source .venv/bin/activate
+nfl-reconstruct run \
+  --config configs/clip3-full.json \
+  --run-dir runs/clip3-full \
+  --stages prepare,camera,mosaic
+```
+
+The main review files are
+`runs/clip3-full/mosaic/reconstruction-preview.mp4`,
+`runs/clip3-full/mosaic/mosaic.png`,
+`runs/clip3-full/camera/camera-summary.json`, and
+`runs/clip3-full/mosaic/evaluation.json`.

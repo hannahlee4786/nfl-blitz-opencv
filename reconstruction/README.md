@@ -29,8 +29,8 @@ nfl-reconstruct run --config configs/clip3.json --run-dir runs/clip3-mvp \
 
 Use `--frame-range 26:36` for a ten-frame bounded smoke test. The run writes a
 manifest, decoded frames, camera JSONL, camera summary, static-field mosaic,
-projected-field overlay, and evaluation JSON. Repeating an identical command
-reuses completed stages.
+projected-field overlay, side-by-side reconstruction preview, and evaluation
+JSON. Repeating an identical command reuses completed stages.
 
 ## Full clips
 
@@ -76,6 +76,19 @@ or `filled`); `camera-pose.json`, the camera's position in yards, pan, tilt,
 roll, and focal length per frame for other tools; and `camera-summary.json`.
 `up_sign` is -1 when the calibration labels the sidelines so that the camera
 sits on the -z side of the field, as it does for Clip 1.
+
+## Side-by-side preview
+
+The mosaic stage automatically writes
+`runs/<run-name>/mosaic/reconstruction-preview.mp4`. The left pane shows each
+source frame with the estimated field grid projected over it. The right pane
+shows that same frame warped into fixed field coordinates, so the field stays
+stationary while observed coverage changes as the source camera pans or zooms.
+
+Green labels mark snapped reliable estimates. Yellow labels keep predicted,
+filled, uncertain, or missing estimates visible for diagnosis instead of
+removing those frames from the timeline. A selected frame range produces only
+those selected frames while preserving the source video's frame rate.
 
 ## Player flow
 
