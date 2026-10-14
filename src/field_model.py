@@ -13,7 +13,7 @@ LOWER_HASH_Y = 29.75
 
 # Centers of the painted yard numbers, measured from the upper sideline.
 # NFL Blitz paints them 15.8 yards in from each sideline (measured on
-# gameplay3), not about 8 yards as on a real NFL field.
+# Clip_3), not about 8 yards as on a real NFL field.
 UPPER_NUMBER_Y = 15.8
 LOWER_NUMBER_Y = FIELD_WIDTH - UPPER_NUMBER_Y
 

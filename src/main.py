@@ -3,7 +3,7 @@ import cv2
 
 # Importing functions from other files
 from src.line_detection import detect_field_lines, filter_field_lines
-from src.preprocessing import preprocess_frame
+from src.preprocessing import find_active_area, preprocess_frame
 from src.video_paths import INPUT_DIR, OUTPUT_DIR, list_input_videos
 from src.visualization import draw_detected_lines
 
@@ -27,13 +27,15 @@ def process_video(input_path, output_path):
   if not writer.isOpened():
     raise RuntimeError(f"Could not create video: {output_path}")
 
+  active_area = find_active_area(input_path)
+
   while True:
     success, frame = capture.read()
 
     if not success:
       break
 
-    processed, field_mask = preprocess_frame(frame)
+    processed, field_mask = preprocess_frame(frame, active_area)
     edges, lines = detect_field_lines(processed, field_mask)
     filtered_lines = filter_field_lines(lines, frame.shape)
 

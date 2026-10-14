@@ -44,3 +44,11 @@ def resolve_video(name):
 
 def calibration_path(video_path):
     return OUTPUT_DIR / f"{video_path.stem}_homography.npz"
+
+
+def tracking_path(video_path):
+    return OUTPUT_DIR / f"{video_path.stem}_tracking.npz"
+
+
+def camera_path(video_path):
+    return OUTPUT_DIR / f"{video_path.stem}_camera.npz"

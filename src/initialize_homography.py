@@ -28,7 +28,7 @@ def parse_arguments():
     parser.add_argument(
         "video",
         nargs="?",
-        default="gameplay3",
+        default="Clip_3",
         help="Video path, or the start of a file name in data/input "
         "(for example Clip_2).",
     )
@@ -57,6 +57,14 @@ def parse_arguments():
         "(COWBOYS) end zone.",
     )
 
+    parser.add_argument(
+        "--reuse-clicks",
+        action="store_true",
+        help="Recalculate from the points clicked last time, on the same "
+        "frame, instead of clicking again. Run this after the field "
+        "model changes.",
+    )
+
     return parser.parse_args()
 
 
@@ -78,6 +86,40 @@ def calculate_reprojection_error(
     return errors
 
 
+def load_previous_clicks(homography_path, field_points):
+    """
+    Return the screen points and frame index saved by the last
+    calibration of this video, so it can be redone without clicking.
+    """
+
+    if not homography_path.exists():
+        raise RuntimeError(
+            f"No earlier calibration to reuse: {homography_path}"
+        )
+
+    previous = np.load(homography_path)
+    previous_field_points = previous["field_points"]
+
+    # A yard line's x never changes, so different x values mean the
+    # earlier calibration clicked different yard lines.
+    if (
+        previous_field_points.shape != field_points.shape
+        or not np.allclose(
+            previous_field_points[:, 0],
+            field_points[:, 0],
+        )
+    ):
+        raise RuntimeError(
+            "The earlier calibration used different yard lines. "
+            "Pass the same --yard-lines and --far-half as before."
+        )
+
+    return (
+        previous["screen_points"].astype(np.float32),
+        int(previous["frame_index"]),
+    )
+
+
 def main():
     arguments = parse_arguments()
 
@@ -92,6 +134,21 @@ def main():
         exist_ok=True,
     )
 
+    calibration_points = create_calibration_points(
+        arguments.yard_lines,
+        arguments.far_half,
+    )
+
+    field_points = get_calibration_field_points(calibration_points)
+
+    if arguments.reuse_clicks:
+        screen_points, frame_index = load_previous_clicks(
+            homography_path,
+            field_points,
+        )
+    else:
+        frame_index = arguments.frame
+
     capture = cv2.VideoCapture(str(input_path))
 
     if not capture.isOpened():
@@ -101,7 +158,7 @@ def main():
 
     capture.set(
         cv2.CAP_PROP_POS_FRAMES,
-        arguments.frame,
+        frame_index,
     )
 
     success, frame = capture.read()
@@ -109,30 +166,30 @@ def main():
 
     if not success:
         raise RuntimeError(
-            f"Could not read frame {arguments.frame}"
+            f"Could not read frame {frame_index}"
         )
-
-    calibration_points = create_calibration_points(
-        arguments.yard_lines,
-        arguments.far_half,
-    )
-
-    field_points = get_calibration_field_points(calibration_points)
 
     print()
-    print(f"Calibrating {input_path.name}, frame {arguments.frame}")
-    print("Select these points in the displayed order:")
 
-    for index, point in enumerate(calibration_points):
+    if arguments.reuse_clicks:
         print(
-            f"{index + 1}. {point['label']} "
-            f"-> {point['coordinate']}"
+            f"Recalibrating {input_path.name} from the points "
+            f"clicked on frame {frame_index}"
         )
+    else:
+        print(f"Calibrating {input_path.name}, frame {frame_index}")
+        print("Select these points in the displayed order:")
 
-    screen_points = select_screen_points(
-        frame,
-        calibration_points,
-    )
+        for index, point in enumerate(calibration_points):
+            print(
+                f"{index + 1}. {point['label']} "
+                f"-> {point['coordinate']}"
+            )
+
+        screen_points = select_screen_points(
+            frame,
+            calibration_points,
+        )
 
     # The painted numbers are wide targets, so careful clicks can still be
     # a few pixels off center. At 3 px RANSAC drops some of them and fits
@@ -178,7 +235,7 @@ def main():
         field_points=field_points,
         screen_points=screen_points,
         inlier_mask=inlier_mask,
-        frame_index=arguments.frame,
+        frame_index=frame_index,
     )
 
     preview = draw_field_grid(
@@ -199,6 +256,11 @@ def main():
 
     print(f"Saved homography to: {homography_path}")
     print(f"Saved preview to: {preview_path}")
+
+    # Nothing was clicked, so check the saved preview instead of
+    # waiting on a window.
+    if arguments.reuse_clicks:
+        return
 
     # Show the result for inspection.
     display_height, display_width = preview.shape[:2]

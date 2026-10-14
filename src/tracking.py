@@ -13,6 +13,16 @@ OPTICAL_FLOW_PARAMETERS = {
     ),
 }
 
+# Features to match between frames when the camera moves too fast for
+# optical flow.
+MAX_MATCH_FEATURES = 3000
+
+# A match must beat the second-best candidate by this ratio to count.
+MATCH_RATIO = 0.75
+
+# Too few agreeing matches to trust the camera motion.
+MIN_MATCHES = 30
+
 
 def track_screen_points(
     previous_gray,
@@ -80,3 +90,70 @@ def track_screen_points(
         valid,
         backward_difference,
     )
+
+
+def match_frame_motion(
+    previous_gray,
+    current_gray,
+    previous_mask,
+    current_mask,
+):
+    """
+    Return the homography that moves the previous frame onto the current
+    one, from matched ORB features, or None.
+
+    Optical flow loses most points in fast camera moves, such as a quick
+    zoom. Matching features works however far the field moved.
+    """
+
+    orb = cv2.ORB_create(MAX_MATCH_FEATURES)
+
+    previous_keypoints, previous_descriptors = orb.detectAndCompute(
+        previous_gray,
+        previous_mask,
+    )
+
+    current_keypoints, current_descriptors = orb.detectAndCompute(
+        current_gray,
+        current_mask,
+    )
+
+    if previous_descriptors is None or current_descriptors is None:
+        return None
+
+    pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(
+        previous_descriptors,
+        current_descriptors,
+        k=2,
+    )
+
+    # Keep matches clearly better than the runner-up. The field repeats
+    # itself, so ambiguous matches are common.
+    matches = [
+        pair[0] for pair in pairs
+        if len(pair) == 2
+        and pair[0].distance < MATCH_RATIO * pair[1].distance
+    ]
+
+    if len(matches) < MIN_MATCHES:
+        return None
+
+    previous_points = np.float32(
+        [previous_keypoints[match.queryIdx].pt for match in matches]
+    )
+
+    current_points = np.float32(
+        [current_keypoints[match.trainIdx].pt for match in matches]
+    )
+
+    motion, inlier_mask = cv2.findHomography(
+        previous_points,
+        current_points,
+        cv2.USAC_MAGSAC,
+        3.0,
+    )
+
+    if motion is None or inlier_mask.sum() < MIN_MATCHES:
+        return None
+
+    return motion

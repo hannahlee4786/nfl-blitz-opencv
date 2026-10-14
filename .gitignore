@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 # data/output/
 .DS_Store
+data/output/*.mp4

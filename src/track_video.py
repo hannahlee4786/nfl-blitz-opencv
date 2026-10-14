@@ -4,11 +4,20 @@ import cv2
 import numpy as np
 
 from src.field_model import create_field_grid
-from src.preprocessing import preprocess_frame
-from src.tracking import track_screen_points
+from src.line_score import (
+    create_distance_map,
+    describe_line_errors,
+    find_painted_lines,
+    get_tracking_status,
+    measure_line_error,
+)
+from src.line_snapping import snap_to_lines
+from src.preprocessing import find_active_area, preprocess_frame
+from src.tracking import match_frame_motion, track_screen_points
 from src.video_paths import (
     OUTPUT_DIR,
     calibration_path,
+    tracking_path,
     list_input_videos,
     resolve_video,
 )
@@ -33,26 +42,13 @@ FEATURE_SPACING = 12
 # it before RANSAC treats it as an outlier.
 RANSAC_THRESHOLD = 3.0
 
-
-def get_confidence(tracked_count, inlier_count):
-    if tracked_count == 0:
-        return "LOW"
-
-    inlier_ratio = inlier_count / tracked_count
-
-    if inlier_count >= 100 and inlier_ratio >= 0.70:
-        return "HIGH"
-
-    if inlier_count >= 30 and inlier_ratio >= 0.50:
-        return "MEDIUM"
-
-    return "LOW"
+# Captures repeat some frames exactly. A frame whose mean difference
+# from the previous one is below this is marked as a duplicate.
+DUPLICATE_DIFFERENCE = 0.5
 
 
-def create_feature_mask(frame, existing_points):
+def create_feature_mask(field_mask, existing_points):
     """Return the pixels where new feature points may be placed."""
-
-    _, field_mask = preprocess_frame(frame)
 
     # Shrink the field so points are not placed on player outlines or
     # HUD edges, which do not move with the field.
@@ -97,12 +93,21 @@ def detect_new_points(gray, mask, homography, count):
 
     # Each point stays tied to the same spot on the field. Look up that
     # spot with the current homography, which maps field to screen.
-    field_points = cv2.perspectiveTransform(
-        screen_points.reshape(-1, 1, 2),
-        np.linalg.inv(homography),
-    ).reshape(-1, 2)
+    return screen_points, screen_to_field(screen_points, homography)
 
-    return screen_points, field_points.astype(np.float32)
+
+def screen_to_field(screen_points, homography):
+    """Return where each screen point is on the field."""
+
+    if len(screen_points) == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    field_points = cv2.perspectiveTransform(
+        screen_points.reshape(-1, 1, 2).astype(np.float32),
+        np.linalg.inv(homography),
+    )
+
+    return field_points.reshape(-1, 2).astype(np.float32)
 
 
 def draw_output_frame(
@@ -111,7 +116,9 @@ def draw_output_frame(
     screen_points,
     frame_index,
     point_count,
-    confidence,
+    line_error,
+    status,
+    snapped,
 ):
     output_frame = draw_field_grid(
         frame,
@@ -128,11 +135,31 @@ def draw_output_frame(
         output_frame,
         frame_index,
         point_count,
-        confidence,
+        line_error,
+        status,
+        snapped,
     )
 
 
-def track_video(input_path, initialization_path, output_path):
+def save_tracking(path, frames, active_area):
+    """Save one entry per frame for the later camera and player steps."""
+
+    np.savez(
+        path,
+        active_area=np.array(active_area),
+        **{
+            name: np.array([frame[name] for frame in frames])
+            for name in frames[0]
+        },
+    )
+
+
+def track_video(
+    input_path,
+    initialization_path,
+    output_path,
+    camera_output_path,
+):
     initialization = np.load(initialization_path)
 
     current_homography = initialization[
@@ -142,6 +169,8 @@ def track_video(input_path, initialization_path, output_path):
     initial_frame_index = int(
         initialization["frame_index"]
     )
+
+    active_area = find_active_area(input_path)
 
     capture = cv2.VideoCapture(str(input_path))
 
@@ -189,15 +218,53 @@ def track_video(input_path, initialization_path, output_path):
         cv2.COLOR_BGR2GRAY,
     )
 
+    _, field_mask = preprocess_frame(previous_frame, active_area)
+
+    painted = find_painted_lines(previous_gray, field_mask)
+    distance_map = create_distance_map(painted)
+
+    # The clicks only pin down the grid near the clicked numbers, so snap
+    # the calibration onto the painted lines as well.
+    snapped_homography = snap_to_lines(
+        current_homography,
+        painted,
+        distance_map,
+        field_mask,
+    )
+
+    snapped = snapped_homography is not None
+
+    if snapped:
+        current_homography = snapped_homography
+
     screen_points, field_points = detect_new_points(
         previous_gray,
-        create_feature_mask(previous_frame, []),
+        create_feature_mask(field_mask, []),
         current_homography,
         MAX_FEATURES,
     )
 
     frame_index = initial_frame_index
-    low_confidence_frames = 0
+
+    line_error = measure_line_error(
+        distance_map,
+        field_mask,
+        current_homography,
+    )
+
+    status = get_tracking_status(line_error)
+
+    frames = [
+        {
+            "frame_index": frame_index,
+            "homography": current_homography,
+            "line_error": line_error,
+            "tracked_points": len(screen_points),
+            "status": status,
+            "snapped": snapped,
+            "duplicate": False,
+        }
+    ]
 
     writer.write(
         draw_output_frame(
@@ -206,7 +273,9 @@ def track_video(input_path, initialization_path, output_path):
             screen_points,
             frame_index,
             len(screen_points),
-            "HIGH",
+            line_error,
+            status,
+            snapped,
         )
     )
 
@@ -218,9 +287,19 @@ def track_video(input_path, initialization_path, output_path):
 
         frame_index += 1
 
+        previous_homography = current_homography
+        previous_field_mask = field_mask
+
         current_gray = cv2.cvtColor(
             current_frame,
             cv2.COLOR_BGR2GRAY,
+        )
+
+        _, field_mask = preprocess_frame(current_frame, active_area)
+
+        duplicate = bool(
+            cv2.absdiff(current_gray, previous_gray).mean()
+            < DUPLICATE_DIFFERENCE
         )
 
         valid_count = 0
@@ -271,11 +350,54 @@ def track_video(input_path, initialization_path, output_path):
             screen_points = np.empty((0, 2), dtype=np.float32)
             field_points = np.empty((0, 2), dtype=np.float32)
 
+        painted = find_painted_lines(current_gray, field_mask)
+        distance_map = create_distance_map(painted)
+
+        # The tracked points only predict the grid. Correct it against
+        # the painted yard lines so errors cannot build up.
+        snapped_homography = snap_to_lines(
+            current_homography,
+            painted,
+            distance_map,
+            field_mask,
+        )
+
+        if snapped_homography is None:
+            # Fast camera moves lose most tracked points, so that
+            # prediction can be far off. Predict again from features
+            # matched between the two frames, and snap that instead.
+            motion = match_frame_motion(
+                previous_gray,
+                current_gray,
+                create_feature_mask(previous_field_mask, []),
+                create_feature_mask(field_mask, []),
+            )
+
+            if motion is not None:
+                snapped_homography = snap_to_lines(
+                    motion @ previous_homography,
+                    painted,
+                    distance_map,
+                    field_mask,
+                )
+
+        snapped = snapped_homography is not None
+
+        if snapped:
+            current_homography = snapped_homography
+
+            # Tie the tracked points to the corrected grid, so the next
+            # prediction starts from it.
+            field_points = screen_to_field(
+                screen_points,
+                current_homography,
+            )
+
         # Top up with new points as old ones are lost.
         if len(screen_points) < MIN_FEATURES:
             new_screen_points, new_field_points = detect_new_points(
                 current_gray,
-                create_feature_mask(current_frame, screen_points),
+                create_feature_mask(field_mask, screen_points),
                 current_homography,
                 MAX_FEATURES - len(screen_points),
             )
@@ -288,13 +410,27 @@ def track_video(input_path, initialization_path, output_path):
                 [field_points, new_field_points]
             )
 
-        confidence = get_confidence(
-            valid_count,
-            inlier_count,
+        # Score the grid against the painted lines, not against the
+        # tracked points, which drift along with the homography.
+        line_error = measure_line_error(
+            distance_map,
+            field_mask,
+            current_homography,
         )
 
-        if confidence == "LOW":
-            low_confidence_frames += 1
+        status = get_tracking_status(line_error)
+
+        frames.append(
+            {
+                "frame_index": frame_index,
+                "homography": current_homography,
+                "line_error": line_error,
+                "tracked_points": inlier_count,
+                "status": status,
+                "snapped": snapped,
+                "duplicate": duplicate,
+            }
+        )
 
         writer.write(
             draw_output_frame(
@@ -303,7 +439,9 @@ def track_video(input_path, initialization_path, output_path):
                 screen_points,
                 frame_index,
                 inlier_count,
-                confidence,
+                line_error,
+                status,
+                snapped,
             )
         )
 
@@ -312,8 +450,25 @@ def track_video(input_path, initialization_path, output_path):
     capture.release()
     writer.release()
 
-    print(f"Frames with LOW confidence: {low_confidence_frames}")
+    save_tracking(camera_output_path, frames, active_area)
+
+    print(
+        describe_line_errors(
+            [frame["line_error"] for frame in frames],
+            [frame["status"] for frame in frames],
+        )
+    )
+
+    snapped_percent = 100.0 * np.mean(
+        [frame["snapped"] for frame in frames]
+    )
+
+    print(
+        "Snapped to the painted lines on "
+        f"{snapped_percent:.0f}% of frames"
+    )
     print(f"Saved tracked video to: {output_path}")
+    print(f"Saved per-frame tracking to: {camera_output_path}")
 
 
 def parse_arguments():
@@ -366,6 +521,7 @@ def main():
             input_path,
             initialization_path,
             OUTPUT_DIR / f"{input_path.stem}_tracked.mp4",
+            tracking_path(input_path),
         )
 
 

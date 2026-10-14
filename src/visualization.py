@@ -140,26 +140,42 @@ def draw_tracking_status(
     frame,
     frame_index,
     tracked_count,
-    confidence,
+    line_error,
+    status,
+    snapped,
 ):
     result = frame.copy()
+
+    if np.isnan(line_error):
+        line_error_text = "n/a"
+    else:
+        line_error_text = f"{line_error:.1f} px"
 
     text = (
         f"Frame: {frame_index} | "
         f"Points: {tracked_count} | "
-        f"Confidence: {confidence}"
+        f"Line error: {line_error_text} | "
+        f"{status} | "
+        f"{'snapped' if snapped else 'predicted'}"
     )
 
     color = {
-        "HIGH": (0, 255, 0),
-        "MEDIUM": (0, 255, 255),
-        "LOW": (0, 0, 255),
-    }.get(confidence, (255, 255, 255))
+        "GOOD": (0, 255, 0),
+        "FAIR": (0, 255, 255),
+        "LOST": (0, 0, 255),
+    }.get(status, (255, 255, 255))
+
+    (text_width, _), _ = cv2.getTextSize(
+        text,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        2,
+    )
 
     cv2.rectangle(
         result,
         (10, 10),
-        (570, 55),
+        (text_width + 30, 55),
         (0, 0, 0),
         -1,
     )
