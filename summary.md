@@ -116,13 +116,12 @@ line error, with 153 of 186 frames LOST.
 
 ## Tests
 
-97 tests pass: Joyce's 47 plus 50 new ones. The new tests check snapping,
-the camera solve (fixed lens, zoom, lost frames, mirrored clips), black bars,
-point tracking, and one end-to-end run on a small generated clip.
+130 tests pass. They check snapping, the camera solve (fixed lens, zoom, lost
+frames, mirrored clips), black bars, point tracking, the camera overview, preview
+encoding, and one end-to-end run on a small generated clip.
 
 ## Not done yet
 
-- Not committed.
 - Joyce's cropped Clip 3 config wasn't re-run: that video isn't on this machine.
 - Not ported: the calibration click tool, the camera video, the drift report,
   and the duplicate-frame flag.
