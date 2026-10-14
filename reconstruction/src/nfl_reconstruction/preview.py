@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
+from pathlib import Path
+
+import av
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image, ImageDraw
@@ -77,3 +81,51 @@ def render_preview_frame(
     draw.line((pane_width, 0, pane_width, height), fill=color, width=2)
     draw.rectangle((0, 0, width - 1, height - 1), outline=color, width=4)
     return np.asarray(canvas, dtype=np.uint8)
+
+
+def write_preview_video(
+    path: str | Path,
+    frames: list[NDArray[np.uint8]],
+    cameras: list[CameraFrame],
+    dynamic_masks: list[NDArray[np.bool_]],
+    field: NFLField,
+    *,
+    fps: Fraction,
+    size: tuple[int, int] = (1280, 720),
+    pixels_per_yard: int = 4,
+) -> None:
+    """Encode a side-by-side diagnostic video at the source frame rate."""
+
+    if not frames:
+        raise ValueError("Preview requires at least one frame.")
+    if len(frames) != len(cameras) or len(frames) != len(dynamic_masks):
+        raise ValueError("Frames, camera records, and masks must have the same length.")
+    if fps <= 0:
+        raise ValueError("Preview frame rate must be positive.")
+    width, height = size
+    if width <= 0 or height <= 0 or width % 2 or height % 2:
+        raise ValueError("Preview size must contain positive even dimensions.")
+
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with av.open(str(output), "w") as container:
+        stream = container.add_stream("mpeg4", rate=fps)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuv420p"
+        for frame, camera, mask in zip(
+            frames, cameras, dynamic_masks, strict=True
+        ):
+            rendered = render_preview_frame(
+                frame,
+                camera,
+                mask,
+                field,
+                size=size,
+                pixels_per_yard=pixels_per_yard,
+            )
+            video_frame = av.VideoFrame.from_ndarray(rendered, format="rgb24")
+            for packet in stream.encode(video_frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)

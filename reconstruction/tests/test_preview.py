@@ -1,7 +1,11 @@
+from fractions import Fraction
+
+import av
 import numpy as np
+import pytest
 
 from nfl_reconstruction.field import NFLField
-from nfl_reconstruction.preview import render_preview_frame
+from nfl_reconstruction.preview import render_preview_frame, write_preview_video
 from nfl_reconstruction.schemas import CameraFrame
 from tests.fixtures import synthetic_state
 
@@ -57,3 +61,48 @@ def test_preview_frame_uses_warning_treatment_for_missing_camera():
     warning_pixels = (rendered[..., 0] > 200) & (rendered[..., 1] > 120)
     assert warning_pixels.any()
     assert rendered[100:, 650:].mean() < rendered[100:, :630].mean()
+
+
+def test_preview_video_preserves_count_dimensions_and_fractional_rate(tmp_path):
+    frames = [
+        np.full((101, 157, 3), value, dtype=np.uint8)
+        for value in (30, 90, 150)
+    ]
+    cameras = [preview_camera(frame=26 + index) for index in range(3)]
+    masks = [np.zeros(frame.shape[:2], dtype=bool) for frame in frames]
+    output = tmp_path / "preview.mp4"
+
+    write_preview_video(
+        output,
+        frames,
+        cameras,
+        masks,
+        NFLField.standard(),
+        fps=Fraction(30000, 1001),
+        size=(640, 360),
+        pixels_per_yard=1,
+    )
+
+    with av.open(str(output)) as container:
+        stream = container.streams.video[0]
+        decoded = list(container.decode(video=0))
+        assert Fraction(stream.average_rate) == Fraction(30000, 1001)
+    assert len(decoded) == 3
+    assert (decoded[0].width, decoded[0].height) == (640, 360)
+
+
+def test_preview_video_rejects_length_mismatch_before_writing(tmp_path):
+    frame = np.zeros((12, 16, 3), dtype=np.uint8)
+    output = tmp_path / "partial.mp4"
+
+    with pytest.raises(ValueError, match="same length"):
+        write_preview_video(
+            output,
+            [frame, frame],
+            [preview_camera()],
+            [np.zeros(frame.shape[:2], dtype=bool)] * 2,
+            NFLField.standard(),
+            fps=Fraction(30, 1),
+        )
+
+    assert not output.exists()
