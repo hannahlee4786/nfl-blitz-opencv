@@ -141,7 +141,10 @@ the right-side field stays still while the visible coverage changes as the sourc
 camera pans or zooms. Green labels mark snapped reliable estimates; yellow labels
 mark predicted, filled, uncertain, or missing estimates.
 
-Run the full Clip 3 flow with:
+On the full Clip 3 run, 184 of 186 frames are reliable; the fixed-field pane is
+intentionally black outside each frame's current camera footprint.
+
+## Run the full Clip 3 flow
 
 ```bash
 cd reconstruction
