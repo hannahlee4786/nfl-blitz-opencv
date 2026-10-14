@@ -12,26 +12,38 @@ from PIL import Image
 import typer
 
 from .annotations import anchor_homography, load_anchor
+from .camera_solve import (
+    describe_solution,
+    export_pose_json,
+    pose_to_state,
+    solve_camera,
+)
 from .detection import UltralyticsDetector, export_yolo_dataset
 from .evaluation import evaluate_run
-from .evidence import build_exclusion_mask, field_evidence
+from .evidence import build_exclusion_mask
 from .field import NFLField
+from .grid_tracking import measure_line_errors, track_grid
+from .line_score import get_tracking_status
 from .mosaic import build_mosaic
-from .motion import estimate_frame_motion
 from .pipeline import run_pipeline
+from .preprocessing import find_active_area
 from .schemas import (
     CameraFrame,
-    CameraState,
     DetectionRecord,
     FrameRecord,
     RunManifest,
     TrackRecord,
+    VideoInfo,
 )
 from .tracking import track_players
 from .video import build_manifest, probe_video
 from .visualization import render_minimap, render_overlay
 
 app = typer.Typer(help="Reconstruct a static NFL field from a moving-camera clip.")
+
+# How far later stages may trust a camera, by its line-error rating. LOST
+# frames fall below every camera confidence threshold.
+LINE_CONFIDENCE = {"GOOD": 1.0, "FAIR": 0.5, "LOST": 0.0}
 
 
 def _parse_frame_range(value: str | None, default: str) -> range:
@@ -66,10 +78,14 @@ def _project(points: np.ndarray, homography: np.ndarray) -> np.ndarray:
     return homogeneous[:, :2] / homogeneous[:, 2:3]
 
 
-def _field_samples(field: NFLField) -> np.ndarray:
-    return np.concatenate(
-        [np.linspace(start, end, 80) for start, end in field.marking_segments()]
-    )
+def _describe_errors(errors: np.ndarray) -> dict[str, float | None]:
+    measured = errors[~np.isnan(errors)]
+    if not measured.size:
+        return {"median": None, "p95": None}
+    return {
+        "median": float(np.median(measured)),
+        "p95": float(np.percentile(measured, 95)),
+    }
 
 
 class ReconstructionRunner:
@@ -102,65 +118,84 @@ class ReconstructionRunner:
         if anchor.frame not in indices:
             raise ValueError("Selected frame range must contain the manual anchor frame.")
 
+        active_area = find_active_area(frames)
         rectangles = [tuple(item) for item in config.get("hud_rectangles", [])]
-        excluded = build_exclusion_mask(image_size, rectangles)
-        relative_motion, motion_quality = estimate_frame_motion(
-            frames, excluded, indices.index(anchor.frame)
-        )
+        excluded = build_exclusion_mask(image_size, rectangles, active_area=active_area)
         base_homography = anchor_homography(anchor)
         anchor_field = np.asarray([(point.x, point.y) for point in anchor.field_points])
         anchor_image = np.asarray([(point.x, point.y) for point in anchor.image_points])
         anchor_error = float(
             np.linalg.norm(_project(anchor_field, base_homography) - anchor_image, axis=1).mean()
         )
-        field = NFLField.standard()
-        samples = _field_samples(field)
-        state = CameraState(
-            target_x=55.0,
-            target_y=field.width_yards / 2,
-            distance=55.0,
-            yaw_degrees=0.0,
-            pitch_degrees=48.0,
-            focal_px=720.0,
+        grid = track_grid(frames, excluded, indices.index(anchor.frame), base_homography)
+        solution = solve_camera(
+            grid.homographies, grid.statuses, grid.snapped, image_size, active_area
+        )
+        tracked_errors, raw_errors, line_errors = measure_line_errors(
+            frames,
+            excluded,
+            [list(grid.homographies), solution.raw_homographies, list(solution.homographies)],
         )
         camera_records = []
-        for motion, quality, index, frame in zip(
-            relative_motion, motion_quality, indices, frames, strict=True
-        ):
-            homography = motion @ base_homography
-            evidence = field_evidence(frame, excluded)
-            pixels = _project(samples, homography)
-            rounded = np.rint(pixels).astype(int)
-            valid = (
-                np.isfinite(pixels).all(axis=1)
-                & (rounded[:, 0] >= 0)
-                & (rounded[:, 0] < image_size[0])
-                & (rounded[:, 1] >= 0)
-                & (rounded[:, 1] < image_size[1])
-            )
-            error = float(np.median(evidence.distance[rounded[valid, 1], rounded[valid, 0]])) if valid.any() else float(max(image_size))
-            confidence = 1.0 if index == anchor.frame else float(
-                np.clip(math.sqrt(quality * math.exp(-error / 20.0)), 0.0, 1.0)
-            )
+        for position, index in enumerate(indices):
+            line_error = float(line_errors[position])
+            fit_error = float(solution.fit_errors[position])
+            rating = get_tracking_status(line_error)
             camera_records.append(
                 CameraFrame(
                     frame=index,
-                    state=state,
-                    confidence=confidence,
-                    status="reliable" if confidence >= 0.25 else "uncertain",
-                    reprojection_error_px=anchor_error if index == anchor.frame else error,
-                    homography=tuple(tuple(float(value) for value in row) for row in homography),
+                    state=pose_to_state(
+                        solution.parameters[position],
+                        solution.focals[position],
+                        solution.up_sign,
+                    ),
+                    confidence=LINE_CONFIDENCE[rating],
+                    status="uncertain" if rating == "LOST" else "reliable",
+                    reprojection_error_px=None if math.isnan(fit_error) else fit_error,
+                    homography=tuple(
+                        tuple(float(value) for value in row)
+                        for row in solution.homographies[position]
+                    ),
                     anchor_source=anchor.frame,
+                    line_error_px=None if math.isnan(line_error) else line_error,
+                    source=str(solution.sources[position]),
                 )
             )
         _write_jsonl(output_dir / "camera.jsonl", camera_records)
+        video = VideoInfo.model_validate(config["video"])
+        export_pose_json(
+            output_dir / "camera-pose.json",
+            config["input"],
+            image_size,
+            video.fps_numerator / video.fps_denominator,
+            indices,
+            solution,
+        )
         (output_dir / "camera-summary.json").write_text(
             json.dumps(
                 {
                     "seed_anchor_reprojection_error_px": anchor_error,
-                    "motion_model": "Kornia SIFT/RANSAC projective motion with phase-correlation fallback",
+                    "motion_model": "Optical-flow points on the grass, with ORB frame matching for fast moves, snapped onto the painted yard lines",
+                    "camera_model": "Pinhole camera solved on every frame and smoothed over time",
                     "reliable": sum(record.status == "reliable" for record in camera_records),
                     "uncertain": sum(record.status == "uncertain" for record in camera_records),
+                    "active_area": list(active_area),
+                    "snapped_fraction": float(grid.snapped.mean()),
+                    "sources": {
+                        name: int((solution.sources == name).sum())
+                        for name in ("snapped", "predicted", "filled")
+                    },
+                    "lens_changes": solution.lens_changes,
+                    "fov_degrees": [float(solution.fovs.min()), float(solution.fovs.max())],
+                    "up_sign": int(solution.up_sign),
+                    "line_error_px": {
+                        "tracked_grid": _describe_errors(tracked_errors),
+                        "camera": _describe_errors(raw_errors),
+                        "smoothed_camera": _describe_errors(line_errors),
+                    },
+                    "report": describe_solution(
+                        solution, tracked_errors, raw_errors, line_errors
+                    ),
                 },
                 indent=2,
             )
@@ -173,11 +208,15 @@ class ReconstructionRunner:
         )
         frames = [np.asarray(Image.open(record.path).convert("RGB")) for record in prepared.frames]
         cameras = _read_jsonl(run_dir / "camera" / "camera.jsonl", CameraFrame)
+        camera_summary = json.loads((run_dir / "camera" / "camera-summary.json").read_text())
+        active_area = camera_summary.get("active_area")
         rectangles = [tuple(item) for item in config.get("hud_rectangles", [])]
-        masks = [
-            build_exclusion_mask((frame.shape[1], frame.shape[0]), rectangles)
-            for frame in frames
-        ]
+        mask = build_exclusion_mask(
+            (frames[0].shape[1], frames[0].shape[0]),
+            rectangles,
+            active_area=tuple(active_area) if active_area else None,
+        )
+        masks = [mask] * len(frames)
         result = build_mosaic(
             frames,
             cameras,
@@ -216,9 +255,7 @@ class ReconstructionRunner:
         report = evaluate_run(cameras, [])
         summary = report.model_dump()
         summary["coverage_fraction"] = float(result.coverage.mean())
-        summary.update(
-            json.loads((run_dir / "camera" / "camera-summary.json").read_text())
-        )
+        summary.update(camera_summary)
         (output_dir / "evaluation.json").write_text(json.dumps(summary, indent=2))
 
     def detect(self, output_dir: Path, config: dict) -> None:
@@ -349,6 +386,8 @@ def run_command(
             f"uncertain={summary['uncertain']} "
             f"missing={sum(record.status == 'missing' for record in camera_records)}"
         )
+        for line in summary.get("report", []):
+            typer.echo(line)
     mosaic_evaluation = run_dir / "mosaic" / "evaluation.json"
     if "mosaic" in stage_names and mosaic_evaluation.exists():
         temporary = run_dir / ".evaluation.json.tmp"

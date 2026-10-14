@@ -55,3 +55,10 @@ class NFLField:
             ((10.0, self.upper_hash_y), (110.0, self.upper_hash_y)),
             ((10.0, self.lower_hash_y), (110.0, self.lower_hash_y)),
         )
+
+
+# Centers of the painted yard numbers, measured from the upper sideline.
+# NFL Blitz paints them 15.8 yards in from each sideline (measured on
+# Clip_3), not about 8 yards as on a real NFL field.
+UPPER_NUMBER_Y = 15.8
+LOWER_NUMBER_Y = NFLField.standard().width_yards - UPPER_NUMBER_Y

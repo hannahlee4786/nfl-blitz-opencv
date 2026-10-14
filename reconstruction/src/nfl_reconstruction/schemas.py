@@ -40,6 +40,9 @@ class CameraState(SchemaModel):
     pitch_degrees: float = Field(allow_inf_nan=False)
     focal_px: float = Field(gt=0, allow_inf_nan=False)
     roll_degrees: float = Field(default=0.0, allow_inf_nan=False)
+    # -1 when the calibration labels the sidelines so that the camera sits
+    # on the -z side of the field plane, where z = x cross y.
+    up_sign: Literal[1, -1] = 1
 
 
 class CameraFrame(SchemaModel):
@@ -52,6 +55,8 @@ class CameraFrame(SchemaModel):
     )
     homography: tuple[tuple[float, float, float], ...] | None = None
     anchor_source: int | None = Field(default=None, ge=0)
+    line_error_px: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    source: Literal["snapped", "predicted", "filled"] | None = None
 
 
 class DetectionRecord(SchemaModel):

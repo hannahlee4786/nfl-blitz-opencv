@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "run_id": "clip4-full",
+  "input": "../../data/input/Clip_4 Camera Swing and Distance Change Test.mp4",
+  "anchor": "../annotations/clip4-full-anchor.json",
+  "stages": ["prepare", "camera", "mosaic"],
+  "default_frame_range": "0:260",
+  "pixels_per_yard": 4,
+  "camera_confidence_threshold": 0.25,
+  "hud_rectangles": [
+    [0.0, 0.0, 0.2, 0.18],
+    [0.4, 0.0, 0.88, 0.27],
+    [0.0, 0.78, 1.0, 1.0]
+  ]
+}

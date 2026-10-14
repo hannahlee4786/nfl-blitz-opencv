@@ -41,3 +41,18 @@ def test_dark_uniform_field_has_no_line_evidence():
     evidence = field_evidence(frame, np.zeros((20, 30), dtype=bool))
 
     assert evidence.line_likelihood.max() == 0
+
+
+def test_exclusion_rectangles_are_placed_on_the_game_picture():
+    mask = build_exclusion_mask((60, 10), [(0.0, 0.0, 0.5, 0.5)], active_area=(10, 50))
+
+    assert mask[:, :10].all()
+    assert mask[:, 50:].all()
+    assert mask[:5, 10:30].all()
+    assert not mask[:5, 30:50].any()
+    assert not mask[5:, 10:50].any()
+
+
+def test_exclusion_rejects_an_active_area_outside_the_image():
+    with pytest.raises(ValueError, match="Active area"):
+        build_exclusion_mask((60, 10), [], active_area=(10, 70))

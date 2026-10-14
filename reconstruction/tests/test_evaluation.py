@@ -51,3 +51,30 @@ def test_evaluation_counts_out_of_bounds_tracks():
 
     assert report.out_of_bounds_rate == 1.0
 
+
+
+def test_evaluation_reports_line_error_and_lost_frames():
+    cameras = [
+        CameraFrame(
+            frame=index,
+            state=synthetic_state(),
+            confidence=1,
+            line_error_px=error,
+            source="snapped",
+        )
+        for index, error in enumerate((0.0, 1.0, 2.0, 5.0, None))
+    ]
+
+    report = evaluate_run(cameras, [])
+
+    assert report.median_line_error_px == pytest.approx(1.5)
+    assert report.lost_fraction == pytest.approx(0.4)
+
+
+def test_evaluation_without_line_scores_leaves_them_empty():
+    cameras = [CameraFrame(frame=0, state=synthetic_state(), confidence=1)]
+
+    report = evaluate_run(cameras, [])
+
+    assert report.median_line_error_px is None
+    assert report.lost_fraction is None

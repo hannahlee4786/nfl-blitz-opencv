@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
+
 from pydantic import BaseModel, ConfigDict, Field
 import numpy as np
 
+from .line_score import get_tracking_status
 from .schemas import CameraFrame, TrackRecord
 
 
@@ -15,6 +18,9 @@ class EvaluationReport(BaseModel):
 
     median_reprojection_error_px: float | None = None
     p95_reprojection_error_px: float | None = None
+    median_line_error_px: float | None = None
+    p95_line_error_px: float | None = None
+    lost_fraction: float | None = Field(default=None, ge=0.0, le=1.0)
     camera_smoothness: float | None = None
     detection_recall: float | None = Field(default=None, ge=0.0, le=1.0)
     out_of_bounds_rate: float = Field(ge=0.0, le=1.0)
@@ -41,6 +47,28 @@ def evaluate_run(
     )
     median_error = float(np.median(errors)) if errors.size else None
     p95_error = float(np.percentile(errors, 95)) if errors.size else None
+
+    line_errors = np.asarray(
+        [
+            frame.line_error_px
+            for frame in camera_frames
+            if frame.line_error_px is not None
+        ],
+        dtype=float,
+    )
+    median_line_error = float(np.median(line_errors)) if line_errors.size else None
+    p95_line_error = float(np.percentile(line_errors, 95)) if line_errors.size else None
+    lost_fraction = None
+    if line_errors.size:
+        # Frames whose grid could not be measured count as lost.
+        lost = sum(
+            get_tracking_status(
+                math.nan if frame.line_error_px is None else frame.line_error_px
+            )
+            == "LOST"
+            for frame in camera_frames
+        )
+        lost_fraction = lost / len(camera_frames)
 
     ordered = sorted(camera_frames, key=lambda frame: frame.frame)
     smoothness = None
@@ -82,6 +110,9 @@ def evaluate_run(
     return EvaluationReport(
         median_reprojection_error_px=median_error,
         p95_reprojection_error_px=p95_error,
+        median_line_error_px=median_line_error,
+        p95_line_error_px=p95_line_error,
+        lost_fraction=lost_fraction,
         camera_smoothness=smoothness,
         detection_recall=recall,
         out_of_bounds_rate=out_of_bounds_rate,

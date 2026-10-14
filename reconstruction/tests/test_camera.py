@@ -47,3 +47,14 @@ def test_projection_is_differentiable():
 
     assert points.grad is not None
     assert torch.isfinite(points.grad).all()
+
+
+def test_mirrored_camera_sees_the_field_from_the_negative_z_side():
+    state = synthetic_state(up_sign=-1)
+
+    assert camera_visibility(state, NFLField.standard(), (864, 614)) > 0
+    assert camera_visibility(
+        synthetic_state(up_sign=-1, pitch_degrees=-20.0),
+        NFLField.standard(),
+        (864, 614),
+    ) == 0.0

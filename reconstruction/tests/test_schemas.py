@@ -48,3 +48,33 @@ def test_schema_models_are_immutable():
 
     with pytest.raises(ValidationError, match="frozen"):
         point.x = 11
+
+
+def test_camera_state_up_sign_defaults_to_up_and_rejects_other_values():
+    values = {
+        "target_x": 50,
+        "target_y": 26,
+        "distance": 40,
+        "yaw_degrees": 0,
+        "pitch_degrees": 45,
+        "focal_px": 700,
+    }
+
+    assert CameraState(**values).up_sign == 1
+    assert CameraState(**values, up_sign=-1).up_sign == -1
+    with pytest.raises(ValidationError, match="up_sign"):
+        CameraState(**values, up_sign=0)
+
+
+def test_camera_frame_rejects_unknown_grid_source():
+    state = CameraState(
+        target_x=50,
+        target_y=26,
+        distance=40,
+        yaw_degrees=0,
+        pitch_degrees=45,
+        focal_px=700,
+    )
+
+    with pytest.raises(ValidationError, match="source"):
+        CameraFrame(frame=0, state=state, confidence=1, source="guessed")

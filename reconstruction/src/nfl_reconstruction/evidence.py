@@ -21,9 +21,23 @@ def build_exclusion_mask(
     image_size: tuple[int, int],
     rectangles: list[tuple[float, float, float, float]],
     dynamic_mask: NDArray[np.bool_] | None = None,
+    active_area: tuple[int, int] | None = None,
 ) -> NDArray[np.bool_]:
+    """Exclude HUD rectangles, black bars, and dynamic pixels.
+
+    Rectangles are fractions of the game picture, the columns in
+    `active_area`, which is narrower than the frame when the capture pads
+    the picture with black bars.
+    """
+
     width, height = image_size
+    picture_left, picture_right = active_area or (0, width)
+    if not 0 <= picture_left < picture_right <= width:
+        raise ValueError("Active area must be ordered columns inside the image.")
+    picture_width = picture_right - picture_left
     mask = np.zeros((height, width), dtype=bool)
+    mask[:, :picture_left] = True
+    mask[:, picture_right:] = True
     if dynamic_mask is not None:
         if dynamic_mask.shape != mask.shape:
             raise ValueError(
@@ -35,7 +49,8 @@ def build_exclusion_mask(
         x1, y1, x2, y2 = rectangle
         if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
             raise ValueError("Exclusion rectangles must be normalized and ordered.")
-        left, right = int(np.floor(x1 * width)), int(np.ceil(x2 * width))
+        left = picture_left + int(np.floor(x1 * picture_width))
+        right = picture_left + int(np.ceil(x2 * picture_width))
         top, bottom = int(np.floor(y1 * height)), int(np.ceil(y2 * height))
         mask[top:bottom, left:right] = True
     return mask

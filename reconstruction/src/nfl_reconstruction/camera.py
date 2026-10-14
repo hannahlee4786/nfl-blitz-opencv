@@ -17,6 +17,12 @@ def _value(state: TensorState, name: str) -> torch.Tensor:
     return torch.as_tensor(value, dtype=torch.float64)
 
 
+def _up_sign(state: TensorState) -> float:
+    if isinstance(state, Mapping):
+        return float(state.get("up_sign", 1))
+    return float(state.up_sign)
+
+
 def camera_matrix(
     state: TensorState,
     image_size: tuple[int, int],
@@ -43,7 +49,7 @@ def _camera_center(state: TensorState) -> torch.Tensor:
         [
             _value(state, "target_x") + horizontal * torch.sin(yaw),
             _value(state, "target_y") + horizontal * torch.cos(yaw),
-            distance * torch.sin(pitch),
+            _up_sign(state) * distance * torch.sin(pitch),
         ]
     )
 
@@ -58,7 +64,7 @@ def world_to_camera(state: TensorState) -> torch.Tensor:
         ]
     )
     forward = torch.nn.functional.normalize(target - center, dim=0)
-    world_up = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64)
+    world_up = torch.tensor([0.0, 0.0, _up_sign(state)], dtype=torch.float64)
     right = torch.nn.functional.normalize(
         torch.linalg.cross(forward, world_up), dim=0
     )
@@ -114,7 +120,7 @@ def camera_visibility(
     field: NFLField,
     image_size: tuple[int, int],
 ) -> float:
-    if _camera_center(state)[2].item() <= 0:
+    if _up_sign(state) * _camera_center(state)[2].item() <= 0:
         return 0.0
     width, height = image_size
     xs = torch.linspace(0.0, field.length_yards, 13, dtype=torch.float64)
