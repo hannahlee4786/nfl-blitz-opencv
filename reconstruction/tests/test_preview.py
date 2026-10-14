@@ -29,38 +29,42 @@ def preview_camera(**updates):
 def test_preview_frame_is_fixed_size_and_preserves_both_panes():
     frame = np.full((101, 157, 3), (30, 100, 40), dtype=np.uint8)
     frame[:, 50:54] = (245, 245, 245)
-    mask = np.zeros(frame.shape[:2], dtype=bool)
+    overview = np.full((720, 960, 3), (45, 100, 45), dtype=np.uint8)
 
     rendered = render_preview_frame(
         frame,
         preview_camera(),
-        mask,
         NFLField.standard(),
-        size=(1280, 720),
-        pixels_per_yard=1,
+        overview,
+        size=(1920, 720),
     )
 
-    assert rendered.shape == (720, 1280, 3)
+    assert rendered.shape == (720, 1920, 3)
     assert rendered.dtype == np.uint8
-    assert rendered[:, :640].mean() > 0
-    assert rendered[:, 640:].mean() > 0
-    assert rendered[700, 100].max() < 20
+    assert rendered[:, :960].mean() > 0
+    assert rendered[:, 960:].mean() > 0
+    magenta_grid = (
+        (rendered[:, :960, 0] > 180)
+        & (rendered[:, :960, 2] > 180)
+        & (rendered[:, :960, 1] < 160)
+    )
+    assert magenta_grid.any()
 
 
 def test_preview_frame_uses_warning_treatment_for_missing_camera():
     frame = np.full((101, 157, 3), 50, dtype=np.uint8)
-    mask = np.zeros(frame.shape[:2], dtype=bool)
+    overview = np.full((720, 960, 3), (45, 100, 45), dtype=np.uint8)
     missing = preview_camera(
         confidence=0.0, status="missing", homography=None, source=None
     )
 
     rendered = render_preview_frame(
-        frame, missing, mask, NFLField.standard(), size=(1280, 720)
+        frame, missing, NFLField.standard(), overview, size=(1920, 720)
     )
 
     warning_pixels = (rendered[..., 0] > 200) & (rendered[..., 1] > 120)
     assert warning_pixels.any()
-    assert rendered[100:, 650:].mean() < rendered[100:, :630].mean()
+    assert rendered.shape == (720, 1920, 3)
 
 
 def test_preview_video_preserves_count_dimensions_and_fractional_rate(tmp_path):
@@ -69,18 +73,15 @@ def test_preview_video_preserves_count_dimensions_and_fractional_rate(tmp_path):
         for value in (30, 90, 150)
     ]
     cameras = [preview_camera(frame=26 + index) for index in range(3)]
-    masks = [np.zeros(frame.shape[:2], dtype=bool) for frame in frames]
     output = tmp_path / "preview.mp4"
 
     write_preview_video(
         output,
         frames,
         cameras,
-        masks,
         NFLField.standard(),
         fps=Fraction(30000, 1001),
-        size=(640, 360),
-        pixels_per_yard=1,
+        size=(1920, 720),
     )
 
     with av.open(str(output)) as container:
@@ -88,7 +89,7 @@ def test_preview_video_preserves_count_dimensions_and_fractional_rate(tmp_path):
         decoded = list(container.decode(video=0))
         assert Fraction(stream.average_rate) == Fraction(30000, 1001)
     assert len(decoded) == 3
-    assert (decoded[0].width, decoded[0].height) == (640, 360)
+    assert (decoded[0].width, decoded[0].height) == (1920, 720)
 
 
 def test_preview_video_rejects_length_mismatch_before_writing(tmp_path):
@@ -100,7 +101,6 @@ def test_preview_video_rejects_length_mismatch_before_writing(tmp_path):
             output,
             [frame, frame],
             [preview_camera()],
-            [np.zeros(frame.shape[:2], dtype=bool)] * 2,
             NFLField.standard(),
             fps=Fraction(30, 1),
         )

@@ -106,4 +106,4 @@ def test_camera_stage_tracks_solves_and_scores_the_clip(tmp_path):
         preview_frames = list(container.decode(video=0))
         assert Fraction(stream.average_rate) == Fraction(30, 1)
     assert len(preview_frames) == FRAME_COUNT
-    assert (preview_frames[0].width, preview_frames[0].height) == (1280, 720)
+    assert (preview_frames[0].width, preview_frames[0].height) == (1920, 720)

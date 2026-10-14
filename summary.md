@@ -135,14 +135,14 @@ onto the field. Colored areas were observed by the camera; black areas were not.
 It summarizes coverage and is not a video frame.
 
 `reconstruction-preview.mp4` is the frame-by-frame evaluation output. The left
-side shows the source video with the estimated field grid. The right side shows
-the same frame warped onto fixed field coordinates. If calibration is working,
-the right-side field stays still while the visible coverage changes as the source
-camera pans or zooms. Green labels mark snapped reliable estimates; yellow labels
-mark predicted, filled, uncertain, or missing estimates.
+side shows the source video with the estimated field grid. The right side keeps a
+complete rendered field fixed while the solved camera, its visible footprint, and
+its motion path move over it. The clip-wide view looks from behind the camera so
+the camera faces upward into the field, matching the gameplay orientation. Green
+labels mark snapped reliable estimates; warning labels and a gray camera mark
+predicted, filled, uncertain, or missing estimates.
 
-On the full Clip 3 run, 184 of 186 frames are reliable; the fixed-field pane is
-intentionally black outside each frame's current camera footprint.
+On the full Clip 3 run, 184 of 186 frames are reliable.
 
 ## Run the full Clip 3 flow
 

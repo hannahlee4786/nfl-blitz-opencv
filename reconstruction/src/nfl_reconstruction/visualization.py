@@ -25,12 +25,16 @@ def render_overlay(
     camera: CameraFrame,
     detections: Iterable[DetectionRecord],
     tracks: Iterable[TrackRecord],
+    *,
+    line_color: tuple[int, int, int] | None = None,
 ) -> NDArray[np.uint8]:
     """Draw projected markings and player diagnostics on a source frame."""
 
     canvas = Image.fromarray(np.asarray(frame, dtype=np.uint8).copy(), mode="RGB")
     draw = ImageDraw.Draw(canvas)
-    line_color = (0, 255, 0) if camera.status == "reliable" else (255, 190, 0)
+    grid_color = line_color or (
+        (0, 255, 0) if camera.status == "reliable" else (255, 190, 0)
+    )
 
     if camera.homography is not None:
         homography = np.asarray(camera.homography, dtype=float)
@@ -38,7 +42,7 @@ def render_overlay(
             projected_start = _project(start, homography)
             projected_end = _project(end, homography)
             if projected_start is not None and projected_end is not None:
-                draw.line((projected_start, projected_end), fill=line_color, width=2)
+                draw.line((projected_start, projected_end), fill=grid_color, width=2)
 
     team_colors = {
         "offense": (255, 70, 70),

@@ -6,14 +6,19 @@ from fractions import Fraction
 from pathlib import Path
 
 import av
+import cv2
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, ImageDraw
+from PIL import Image
 
+from .camera_overview import build_camera_overview, render_camera_overview
 from .field import NFLField
-from .mosaic import warp_frame_to_field
 from .schemas import CameraFrame
 from .visualization import render_overlay
+
+GRID_COLOR = (230, 70, 255)
+RELIABLE_COLOR = (40, 210, 90)
+WARNING_COLOR = (255, 180, 35)
 
 
 def _fit_image(image: NDArray[np.uint8], size: tuple[int, int]) -> Image.Image:
@@ -31,7 +36,7 @@ def _fit_image(image: NDArray[np.uint8], size: tuple[int, int]) -> Image.Image:
 
 def _status(camera: CameraFrame) -> tuple[tuple[int, int, int], str]:
     reliable = camera.status == "reliable" and camera.source == "snapped"
-    color = (40, 210, 90) if reliable else (255, 180, 35)
+    color = RELIABLE_COLOR if reliable else WARNING_COLOR
     source = camera.source or "no transform"
     error = "n/a" if camera.line_error_px is None else f"{camera.line_error_px:.2f}px"
     return color, (
@@ -43,68 +48,91 @@ def _status(camera: CameraFrame) -> tuple[tuple[int, int, int], str]:
 def render_preview_frame(
     frame: NDArray[np.uint8],
     camera: CameraFrame,
-    dynamic_mask: NDArray[np.bool_],
     field: NFLField,
+    overview_panel: NDArray[np.uint8],
     *,
-    size: tuple[int, int] = (1280, 720),
-    pixels_per_yard: int = 4,
+    size: tuple[int, int] = (1920, 720),
 ) -> NDArray[np.uint8]:
-    """Compose labeled source and canonical-field panes for one frame."""
+    """Compose solved-grid footage and the fixed camera overview."""
 
     width, height = size
     if width <= 0 or height <= 0 or width % 2 or height % 2:
         raise ValueError("Preview size must contain positive even dimensions.")
-    if dynamic_mask.shape != frame.shape[:2]:
-        raise ValueError("Dynamic mask shape must match the source frame.")
+    if overview_panel.ndim != 3 or overview_panel.shape[2] != 3:
+        raise ValueError("Camera overview panel must be an RGB image.")
 
     pane_width = width // 2
-    header_height = min(64, max(36, height // 9))
-    content_size = (pane_width, height - header_height)
-    overlay = render_overlay(frame, field, camera, [], [])
-    warped = warp_frame_to_field(
-        frame, camera, dynamic_mask, field, pixels_per_yard=pixels_per_yard
+    overlay = render_overlay(
+        frame,
+        field,
+        camera,
+        [],
+        [],
+        line_color=GRID_COLOR,
     )
-    canvas = Image.new("RGB", size, (12, 12, 12))
-    canvas.paste(_fit_image(overlay, content_size), (0, header_height))
-    canvas.paste(_fit_image(warped.image, content_size), (pane_width, header_height))
-
-    draw = ImageDraw.Draw(canvas)
+    left = np.asarray(_fit_image(overlay, (pane_width, height)), dtype=np.uint8).copy()
+    right = np.asarray(
+        _fit_image(overview_panel, (pane_width, height)), dtype=np.uint8
+    ).copy()
     color, status_text = _status(camera)
-    draw.rectangle((0, 0, width - 1, header_height - 1), fill=(20, 20, 20))
-    draw.text((12, 8), "SOURCE + PROJECTED FIELD", fill=(235, 235, 235))
-    draw.text(
-        (pane_width + 12, 8),
-        "FIXED FIELD COORDINATES",
-        fill=(235, 235, 235),
+    label_lines = ("Footage with the solved camera's grid", status_text)
+    label_width = max(
+        cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0][0]
+        for line in label_lines
     )
-    draw.text((12, 30), status_text, fill=color)
-    draw.line((pane_width, 0, pane_width, height), fill=color, width=2)
-    draw.rectangle((0, 0, width - 1, height - 1), outline=color, width=4)
-    return np.asarray(canvas, dtype=np.uint8)
+    cv2.rectangle(left, (8, 8), (32 + label_width, 76), (0, 0, 0), -1)
+    cv2.putText(
+        left,
+        label_lines[0],
+        (20, 36),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (235, 235, 235),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        left,
+        label_lines[1],
+        (20, 64),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+    return np.hstack((left, right))
 
 
 def write_preview_video(
     path: str | Path,
     frames: list[NDArray[np.uint8]],
     cameras: list[CameraFrame],
-    dynamic_masks: list[NDArray[np.bool_]],
     field: NFLField,
     *,
     fps: Fraction,
-    size: tuple[int, int] = (1280, 720),
-    pixels_per_yard: int = 4,
+    size: tuple[int, int] = (1920, 720),
 ) -> None:
     """Encode a side-by-side diagnostic video at the source frame rate."""
 
     if not frames:
         raise ValueError("Preview requires at least one frame.")
-    if len(frames) != len(cameras) or len(frames) != len(dynamic_masks):
-        raise ValueError("Frames, camera records, and masks must have the same length.")
+    if len(frames) != len(cameras):
+        raise ValueError("Frames and camera records must have the same length.")
     if fps <= 0:
         raise ValueError("Preview frame rate must be positive.")
     width, height = size
     if width <= 0 or height <= 0 or width % 2 or height % 2:
         raise ValueError("Preview size must contain positive even dimensions.")
+    frame_size = (frames[0].shape[1], frames[0].shape[0])
+    if any(frame.shape[:2] != frames[0].shape[:2] for frame in frames):
+        raise ValueError("Every preview source frame must have the same dimensions.")
+    overview = build_camera_overview(
+        cameras,
+        frame_size,
+        field,
+        size=(width // 2, height),
+    )
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -113,16 +141,13 @@ def write_preview_video(
         stream.width = width
         stream.height = height
         stream.pix_fmt = "yuv420p"
-        for frame, camera, mask in zip(
-            frames, cameras, dynamic_masks, strict=True
-        ):
+        for index, (frame, camera) in enumerate(zip(frames, cameras, strict=True)):
             rendered = render_preview_frame(
                 frame,
                 camera,
-                mask,
                 field,
+                render_camera_overview(overview, index),
                 size=size,
-                pixels_per_yard=pixels_per_yard,
             )
             video_frame = av.VideoFrame.from_ndarray(rendered, format="rgb24")
             for packet in stream.encode(video_frame):

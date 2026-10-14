@@ -81,14 +81,15 @@ sits on the -z side of the field, as it does for Clip 1.
 
 The mosaic stage automatically writes
 `runs/<run-name>/mosaic/reconstruction-preview.mp4`. The left pane shows each
-source frame with the estimated field grid projected over it. The right pane
-shows that same frame warped into fixed field coordinates, so the field stays
-stationary while observed coverage changes as the source camera pans or zooms.
+source frame with the estimated field grid projected over it. The right pane is
+a complete fixed-field overview showing the solved camera, its visible footprint,
+and its motion path. Its clip-wide orientation looks from behind the camera, so
+the camera faces upward into the field in the same direction as the gameplay.
 
 Green labels mark snapped reliable estimates. Yellow labels keep predicted,
-filled, uncertain, or missing estimates visible for diagnosis instead of
-removing those frames from the timeline. A selected frame range produces only
-those selected frames while preserving the source video's frame rate.
+removing those frames from the timeline, and the camera is gray in those frames.
+A selected frame range produces only those selected frames while preserving the
+source video's frame rate.
 
 ## Player flow
 

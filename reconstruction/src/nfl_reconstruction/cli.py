@@ -223,13 +223,11 @@ class ReconstructionRunner:
             output_dir / "reconstruction-preview.mp4",
             frames,
             cameras,
-            masks,
             NFLField.standard(),
             fps=Fraction(
                 prepared.video.fps_numerator,
                 prepared.video.fps_denominator,
             ),
-            pixels_per_yard=int(config.get("pixels_per_yard", 4)),
         )
         result = build_mosaic(
             frames,
