@@ -43,11 +43,19 @@ def parse_arguments():
 
     parser.add_argument(
         "--yard-lines",
-        type=int,
-        nargs=3,
-        default=[20, 30, 40],
+        type=str,
+        nargs="+",
+        default=["20", "30", "40"],
         metavar="YARDS",
-        help="The three painted yard numbers to click.",
+        help="Painted yard numbers to click (10-50). Prefix F or N to "
+        "force the far or near half, for example: 40 50 F40.",
+    )
+
+    parser.add_argument(
+        "--swap-sides",
+        action="store_true",
+        help="The camera faces the +x end zone, so the left number on "
+        "screen is the lower-sideline one.",
     )
 
     parser.add_argument(
@@ -115,6 +123,7 @@ def main():
     calibration_points = create_calibration_points(
         arguments.yard_lines,
         arguments.far_half,
+        arguments.swap_sides,
     )
 
     field_points = get_calibration_field_points(calibration_points)

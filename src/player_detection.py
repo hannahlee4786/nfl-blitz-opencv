@@ -1,304 +1,326 @@
-# Finds players in a gameplay frame. Two interchangeable backends:
-#   "color": classical blob detector for the green-field game footage
-#   "yolo":  optional ultralytics model (pretrained COCO or fine-tuned)
+
+"""Jersey-guided player detection for NFL Blitz gameplay."""
+
 from dataclasses import dataclass
 from typing import Optional
 
 import cv2
 import numpy as np
 
+from src.detection_filters import DetectionFilter, FilterConfig
+from src.field_background import FieldBackground
 from src.field_mapping import (
     invert_homography,
-    pixels_per_yard,
     screen_to_field,
+    upright_scale,
 )
-from src.preprocessing import create_green_mask, create_hud_mask
-
-# ---- Color-blob detector tuning (all sizes in yards, so they carry
-# ---- across clips and zoom levels). Adjust after looking at results.
-MIN_HEIGHT_YARDS = 0.8
-MAX_HEIGHT_YARDS = 4.0
-MIN_WIDTH_YARDS = 0.3
-MAX_WIDTH_YARDS = 2.5
-TYPICAL_WIDTH_YARDS = 1.2
-
-# Blobs wider than SPLIT_RATIO * typical width are cut into several players.
-SPLIT_RATIO = 1.6
-MAX_SPLIT = 4
-
-# Height / width of the box. Painted yard numbers are flat on the
-# ground, so they come out very wide and short and are rejected here.
-MIN_ASPECT = 0.7
-
-# Fraction of the box that must be foreground.
-MIN_FILL = 0.25
-
-# Area in pixels at 480 p; scaled with the frame height.
-MIN_AREA_PIXELS = 60
 
 
 @dataclass
 class Detection:
-    bbox: tuple  # (x1, y1, x2, y2) in screen pixels
+    bbox: tuple
     score: float
-    color: tuple  # mean BGR color of the player
-    field_xy: Optional[np.ndarray] = None  # filled by attach_field_positions
+    color: tuple
+    field_xy: Optional[np.ndarray] = None
+    quality: float = 1.0
+    reason: Optional[str] = None
+    height_yards: Optional[float] = None
+    width_yards: Optional[float] = None
+    team: Optional[str] = None
+    red_fraction: float = 0.0
+    blue_fraction: float = 0.0
+    jersey_strong: bool = False
 
     @property
     def foot(self):
-        """Ground contact estimate: bottom-center of the box."""
         x1, y1, x2, y2 = self.bbox
         return ((x1 + x2) / 2.0, float(y2))
 
 
 def estimate_torso_color(frame, bbox):
-    """Mean BGR of the middle of the box, where the jersey usually is."""
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = bbox
 
-    x1, y1, x2, y2 = [int(round(v)) for v in bbox]
-    height = y2 - y1
-    width = x2 - x1
+    left = max(0, int(x1 + (x2 - x1) * 0.25))
+    right = min(w, int(x1 + (x2 - x1) * 0.75))
+    top = max(0, int(y1 + (y2 - y1) * 0.15))
+    bottom = min(h, int(y1 + (y2 - y1) * 0.65))
 
-    crop = frame[
-        max(0, y1 + int(height * 0.2)):max(1, y1 + int(height * 0.6)),
-        max(0, x1 + int(width * 0.25)):max(1, x1 + int(width * 0.75)),
-    ]
+    crop = frame[top:bottom, left:right]
 
     if crop.size == 0:
         return (128.0, 128.0, 128.0)
 
-    return tuple(float(v) for v in crop.reshape(-1, 3).mean(axis=0))
+    return tuple(
+        float(v) for v in crop.reshape(-1, 3).mean(axis=0)
+    )
 
 
 class ColorBlobDetector:
     """
-    Players are the non-green blobs standing on the green field.
+    Find red/blue jersey seeds and expand them into player boxes.
 
-    1. Take the hull of the largest green region as the field area.
-    2. Keep non-green pixels inside it, minus the HUD.
-    3. Open the mask to erase thin painted lines, close it vertically
-       so head / jersey / legs join into one blob.
-    4. Validate each blob by its size in yards (via the homography),
-       split wide blobs, and keep the box of each piece.
+    Uses the existing field-background model to estimate
+    player extent. Jersey pixels identify candidate centers.
     """
 
     name = "color"
 
-    def __init__(self):
-        self.last_mask = None  # candidate mask, for debugging
+    def __init__(
+        self,
+        min_seed_area=5,
+        max_candidates=80,
+        torso_width_yards=0.9,
+        player_height_yards=2.5,
+        min_foreground_fraction=0.08,
+    ):
+        self.min_seed_area = min_seed_area
+        self.max_candidates = max_candidates
+        self.torso_width_yards = torso_width_yards
+        self.player_height_yards = player_height_yards
+        self.min_foreground_fraction = min_foreground_fraction
+        self.last_mask = None
 
-    def _field_region(self, green_mask):
-        # Work at 1/4 resolution; only the rough outline is needed.
-        height, width = green_mask.shape
-        small = cv2.resize(
-            green_mask,
-            (max(1, width // 4), max(1, height // 4)),
-            interpolation=cv2.INTER_NEAREST,
+    @staticmethod
+    def _color_masks(hsv):
+        hue = hsv[:, :, 0]
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+
+        red = (
+            ((hue <= 10) | (hue >= 168))
+            & (sat >= 90)
+            & (val >= 40)
         )
 
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE,
-            (15, 15),
+        blue = (
+            (hue >= 104)
+            & (hue <= 132)
+            & (sat >= 70)
+            & (val >= 40)
         )
 
-        closed = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
-
-        contours, _ = cv2.findContours(
-            closed,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
+        return (
+            red.astype(np.uint8) * 255,
+            blue.astype(np.uint8) * 255,
         )
 
-        if not contours:
-            return None
-
-        largest = max(contours, key=cv2.contourArea)
-        hull = cv2.convexHull(largest) * 4
-
-        region = np.zeros((height, width), np.uint8)
-        cv2.fillConvexPoly(region, hull, 255)
-
-        return region
-
-    def _column_segments(self, roi, typical_width_pixels):
-        width = roi.shape[1]
-
-        if width <= SPLIT_RATIO * typical_width_pixels:
-            return [(0, width)]
-
-        parts = min(
-            MAX_SPLIT,
-            max(2, int(round(width / typical_width_pixels))),
-        )
-
-        profile = np.convolve(
-            roi.sum(axis=0).astype(np.float32),
-            np.ones(5, np.float32) / 5.0,
-            mode="same",
-        )
-
-        step = width / parts
-        cuts = [0]
-
-        for index in range(1, parts):
-            center = int(round(index * step))
-            half = max(1, int(step * 0.3))
-
-            low = max(cuts[-1] + 1, center - half)
-            high = min(width - 1, center + half)
-
-            if low >= high:
-                continue
-
-            cuts.append(low + int(np.argmin(profile[low:high + 1])))
-
-        cuts.append(width)
-
-        return [
-            (start, end)
-            for start, end in zip(cuts[:-1], cuts[1:])
-            if end > start
-        ]
-
-    def detect(self, frame, homography):
-        height, width = frame.shape[:2]
-        scale = height / 480.0
+    def propose(self, frame, homography, info):
+        if info is None:
+            self.last_mask = None
+            return []
 
         inverse = invert_homography(homography)
 
         if inverse is None:
             return []
 
+        height, width = frame.shape[:2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        green = create_green_mask(hsv)
 
-        region = self._field_region(green)
+        red, blue = self._color_masks(hsv)
 
-        if region is None:
-            return []
-
-        candidates = cv2.bitwise_and(region, cv2.bitwise_not(green))
-        candidates = cv2.bitwise_and(
-            candidates,
-            cv2.bitwise_not(create_hud_mask(frame.shape)),
+        # Merge nearby jersey-colored regions into larger candidates.
+        # Keep the kernel small to avoid combining adjacent players.
+        kernel_size = max(
+            3,
+            int(round(frame.shape[0] / 480.0 * 5)),
         )
 
-        open_size = max(3, int(round(5 * scale)) | 1)
+        if kernel_size % 2 == 0:
+            kernel_size += 1
 
-        candidates = cv2.morphologyEx(
-            candidates,
-            cv2.MORPH_OPEN,
-            cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE,
-                (open_size, open_size),
-            ),
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_size, kernel_size),
         )
 
-        candidates = cv2.morphologyEx(
-            candidates,
+        red = cv2.morphologyEx(
+            red,
             cv2.MORPH_CLOSE,
-            np.ones(
-                (max(3, int(round(9 * scale))), max(3, int(round(3 * scale)))),
-                np.uint8,
-            ),
+            kernel,
         )
 
-        self.last_mask = candidates
-
-        count, labels, stats, _ = cv2.connectedComponentsWithStats(
-            candidates,
-            connectivity=8,
+        blue = cv2.morphologyEx(
+            blue,
+            cv2.MORPH_CLOSE,
+            kernel,
         )
 
-        min_area = MIN_AREA_PIXELS * scale * scale
-        detections = []
 
-        for label in range(1, count):
-            x, y, w, h, area = stats[label]
+        # Field geometry is used as a permissive spatial prior.
+        # Do not mask the entire lower screen: real players
+        # can extend into the lower HUD area.
+        region = info.region > 0
 
-            if area < min_area or w < 2 or h < 2:
-                continue
+        hud = info.hud > 0
 
-            foot = np.array([[x + w / 2.0, y + h]], dtype=np.float32)
-            field_point = screen_to_field(foot, inverse)
+        # Retain color pixels within the field region.
+        valid = region & ~hud
 
-            if not np.all(np.isfinite(field_point)):
-                continue
+        red = np.where(valid, red, 0).astype(np.uint8)
+        blue = np.where(valid, blue, 0).astype(np.uint8)
 
-            ppy = float(pixels_per_yard(homography, field_point)[0])
+        combined = cv2.bitwise_or(red, blue)
+        self.last_mask = combined.copy()
 
-            if not np.isfinite(ppy) or ppy < 1e-3:
-                continue
+        foreground = (
+            (info.background == 0)
+            & (info.hud == 0)
+            & region
+        )
 
-            roi = labels[y:y + h, x:x + w] == label
+        candidates = []
 
-            for start, end in self._column_segments(
-                roi,
-                TYPICAL_WIDTH_YARDS * ppy,
-            ):
-                sub = roi[:, start:end]
-                rows = np.flatnonzero(sub.any(axis=1))
+        for team, mask in (("red", red), ("blue", blue)):
+            count, labels, stats, centroids = (
+                cv2.connectedComponentsWithStats(
+                    mask,
+                    connectivity=8,
+                )
+            )
 
-                if rows.size == 0:
+            components = sorted(
+                range(1, count),
+                key=lambda i: stats[i, cv2.CC_STAT_AREA],
+                reverse=True,
+            )
+
+            for index in components[:self.max_candidates]:
+                x, y, w, h, area = stats[index]
+
+                if area < self.min_seed_area:
                     continue
 
-                top, bottom = rows[0], rows[-1] + 1
-                box_width = end - start
-                box_height = bottom - top
+                cx, cy = centroids[index]
 
-                height_yards = box_height / ppy
-                width_yards = box_width / ppy
+                point = screen_to_field(
+                    np.array([[cx, cy]], dtype=np.float32),
+                    inverse,
+                )
 
-                if not (MIN_HEIGHT_YARDS <= height_yards <= MAX_HEIGHT_YARDS):
+                if not np.all(np.isfinite(point)):
                     continue
 
-                if not (MIN_WIDTH_YARDS <= width_yards <= MAX_WIDTH_YARDS):
+                scale = float(
+                    upright_scale(homography, point)[0]
+                )
+
+                if not np.isfinite(scale) or scale <= 0:
                     continue
 
-                if box_height / box_width < MIN_ASPECT:
+                # Estimate a player box around the jersey.
+                estimated_width = max(
+                    8,
+                    int(self.torso_width_yards * scale),
+                    w,
+                )
+
+                estimated_height = max(
+                    14,
+                    int(self.player_height_yards * scale),
+                    h,
+                )
+
+                # Jersey is normally in the upper body.
+                left = int(cx - estimated_width / 2)
+                right = int(cx + estimated_width / 2)
+                top = int(cy - estimated_height * 0.35)
+                bottom = top + estimated_height
+
+                left = max(0, left)
+                right = min(width, right)
+                top = max(0, top)
+                bottom = min(height, bottom)
+
+                if right <= left or bottom <= top:
                     continue
 
-                fill = float(sub[top:bottom].mean())
+                roi = foreground[top:bottom, left:right]
 
-                if fill < MIN_FILL:
+                if roi.size == 0:
                     continue
 
-                pixels = frame[
-                    y + top:y + bottom,
-                    x + start:x + end,
-                ][sub[top:bottom]]
+                foreground_fraction = float(roi.mean())
 
-                detections.append(
-                    Detection(
-                        bbox=(
-                            float(x + start),
-                            float(y + top),
-                            float(x + end),
-                            float(y + bottom),
-                        ),
-                        score=fill,
-                        color=tuple(float(v) for v in pixels.mean(axis=0)),
+                if (
+                    foreground_fraction
+                    < self.min_foreground_fraction
+                ):
+                    continue
+
+                # Refine using the local foreground extent,
+                # but avoid expanding to unrelated distant blobs.
+                rows, cols = np.where(roi)
+
+                if len(rows) >= 5:
+                    x_low = int(np.percentile(cols, 5))
+                    x_high = int(np.percentile(cols, 95))
+                    y_low = int(np.percentile(rows, 5))
+                    y_high = int(np.percentile(rows, 95))
+
+                    refined_left = left + x_low
+                    refined_right = left + x_high + 1
+                    refined_top = top + y_low
+                    refined_bottom = top + y_high + 1
+
+                    # Preserve the jersey seed within the box.
+                    left = min(refined_left, x)
+                    right = max(refined_right, x + w)
+                    top = min(refined_top, y)
+                    bottom = max(refined_bottom, y + h)
+
+                left = max(0, left)
+                top = max(0, top)
+                right = min(width, right)
+                bottom = min(height, bottom)
+
+                bbox = (
+                    float(left),
+                    float(top),
+                    float(right),
+                    float(bottom),
+                )
+
+                color = estimate_torso_color(frame, bbox)
+
+                # This is a proposal score, not calibrated
+                # object-detection confidence.
+                score = float(
+                    np.clip(
+                        0.4 + 0.6 * foreground_fraction,
+                        0.0,
+                        1.0,
                     )
                 )
 
-        return detections
+                candidates.append(
+                    Detection(
+                        bbox=bbox,
+                        score=score,
+                        color=color,
+                        team=team,
+                    )
+                )
+
+        return candidates
 
 
 class YoloDetector:
-    """
-    Optional ultralytics backend. With the default COCO weights it looks
-    for 'person'. With a model fine-tuned on Blitz frames, pass
-    person_only=False so every class is kept.
-    """
-
     name = "yolo"
 
-    def __init__(self, weights="yolov8n.pt", conf=0.25, person_only=True,
-                 image_size=960):
+    def __init__(
+        self,
+        weights="yolov8n.pt",
+        conf=0.25,
+        person_only=True,
+        image_size=960,
+    ):
         try:
             from ultralytics import YOLO
         except ImportError as error:
             raise ImportError(
-                "The yolo detector needs: pip install ultralytics"
+                "Install ultralytics to use YOLO."
             ) from error
 
         self.model = YOLO(weights)
@@ -307,7 +329,7 @@ class YoloDetector:
         self.image_size = image_size
         self.last_mask = None
 
-    def detect(self, frame, homography):
+    def propose(self, frame, homography, info):
         result = self.model.predict(
             frame,
             conf=self.conf,
@@ -329,16 +351,80 @@ class YoloDetector:
         ]
 
 
-def create_detector(name, weights="yolov8n.pt", conf=0.25,
-                    person_only=True):
-    if name == "color":
-        return ColorBlobDetector()
+class PlayerDetector:
+    def __init__(
+        self,
+        backend,
+        background=None,
+        detection_filter=None,
+    ):
+        self.backend = backend
+        self.background = background or FieldBackground()
+        self.filter = detection_filter or DetectionFilter()
+        self.name = backend.name
+        self.last_mask = None
+        self.rejected = []
 
-    if name == "yolo":
-        return YoloDetector(
+    def reset(self):
+        self.background.reset()
+        self.clear()
+
+    def clear(self):
+        self.last_mask = None
+        self.rejected = []
+
+    def detect(self, frame, homography):
+        self.clear()
+
+        inverse = invert_homography(homography)
+
+        if inverse is None:
+            return []
+
+        info = self.background.analyze(frame, homography)
+
+        proposals = self.backend.propose(
+            frame, homography, info
+        )
+
+        self.last_mask = getattr(
+            self.backend, "last_mask", None
+        )
+
+        kept, self.rejected = self.filter.apply(
+            proposals,
+            frame,
+            homography,
+            inverse,
+            info,
+        )
+
+        return kept
+
+
+def create_detector(
+    name,
+    weights="yolov8n.pt",
+    conf=0.25,
+    person_only=True,
+    filter_config=None,
+):
+    if name == "color":
+        backend = ColorBlobDetector()
+
+    elif name == "yolo":
+        backend = YoloDetector(
             weights=weights,
             conf=conf,
             person_only=person_only,
         )
 
-    raise ValueError(f"Unknown detector: {name!r}")
+    else:
+        raise ValueError(f"Unknown detector: {name}")
+
+    return PlayerDetector(
+        backend,
+        detection_filter=DetectionFilter(
+            filter_config or FilterConfig()
+        ),
+    )

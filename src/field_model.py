@@ -39,36 +39,75 @@ def yard_line_x(yard_number, far_half=False):
     return 10.0 + yard_number
 
 
-def create_calibration_points(yard_numbers=(20, 30, 40), far_half=False):
+VALID_YARD_NUMBERS = (10, 20, 30, 40, 50)
+
+
+def parse_yard_line(token):
+    """
+    "30" -> (30, False)   unprefixed: side follows the far_half flag
+    "F30" -> (30, True)   always the far half
+    "N30" -> (30, False)  always the near half
+    Returns (yard_number, side) where side is True / False / None.
+    """
+
+    text = str(token).strip().upper()
+    side = None
+
+    if text.startswith("F"):
+        side = True
+        text = text[1:]
+    elif text.startswith("N"):
+        side = False
+        text = text[1:]
+
+    number = int(text)
+
+    if number not in VALID_YARD_NUMBERS:
+        raise ValueError(
+            f"Yard number {number} is not painted. "
+            f"Use one of {VALID_YARD_NUMBERS}."
+        )
+
+    return number, side
+
+
+def create_calibration_points(yard_numbers=(20, 30, 40), far_half=False,
+                              swap_sides=False):
     """
     Return the landmarks to click: the center of each painted yard number,
     between its two digits, on both sides of the field.
 
-    The numbers sit about 22 yards apart, so the homography is pinned down
-    across the field better than with the hash rows, which are only about
-    6 yards apart.
-
-    "Left number" assumes the camera faces the x = 0 end zone, as it does
-    at the start of every current clip. Facing the other way swaps left and
-    right.
+    Each entry may be a number or a string such as "F40" (see
+    parse_yard_line). swap_sides=True is for a camera facing the +x end
+    zone, where the screen-left number is the lower-sideline one.
     """
+
+    left_y, right_y = UPPER_NUMBER_Y, LOWER_NUMBER_Y
+
+    if swap_sides:
+        left_y, right_y = right_y, left_y
 
     points = []
 
-    for yard_number in yard_numbers:
-        x = yard_line_x(yard_number, far_half)
+    for token in yard_numbers:
+        yard_number, side = parse_yard_line(token)
+        x = yard_line_x(yard_number, far_half if side is None else side)
+
+        label = f"{token}-yard line" if side is not None else (
+            f"{yard_number}-yard line"
+        )
 
         points.append(
             {
-                "label": f"{yard_number}-yard line, left number",
-                "coordinate": (x, UPPER_NUMBER_Y),
+                "label": f"{label}, left number",
+                "coordinate": (x, left_y),
             }
         )
 
         points.append(
             {
-                "label": f"{yard_number}-yard line, right number",
-                "coordinate": (x, LOWER_NUMBER_Y),
+                "label": f"{label}, right number",
+                "coordinate": (x, right_y),
             }
         )
 
