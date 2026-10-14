@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 import json
 import math
 from pathlib import Path
@@ -27,6 +28,7 @@ from .line_score import get_tracking_status
 from .mosaic import build_mosaic
 from .pipeline import run_pipeline
 from .preprocessing import find_active_area
+from .preview import write_preview_video
 from .schemas import (
     CameraFrame,
     DetectionRecord,
@@ -217,6 +219,18 @@ class ReconstructionRunner:
             active_area=tuple(active_area) if active_area else None,
         )
         masks = [mask] * len(frames)
+        write_preview_video(
+            output_dir / "reconstruction-preview.mp4",
+            frames,
+            cameras,
+            masks,
+            NFLField.standard(),
+            fps=Fraction(
+                prepared.video.fps_numerator,
+                prepared.video.fps_denominator,
+            ),
+            pixels_per_yard=int(config.get("pixels_per_yard", 4)),
+        )
         result = build_mosaic(
             frames,
             cameras,

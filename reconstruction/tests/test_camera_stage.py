@@ -1,3 +1,4 @@
+from fractions import Fraction
 import json
 
 import av
@@ -98,3 +99,11 @@ def test_camera_stage_tracks_solves_and_scores_the_clip(tmp_path):
     assert evaluation["lost_fraction"] == 0.0
     assert evaluation["active_area"] == [0, FRAME_SIZE[0]]
     assert evaluation["coverage_fraction"] > 0
+    preview_path = run_dir / "mosaic" / "reconstruction-preview.mp4"
+    assert preview_path.is_file()
+    with av.open(str(preview_path)) as container:
+        stream = container.streams.video[0]
+        preview_frames = list(container.decode(video=0))
+        assert Fraction(stream.average_rate) == Fraction(30, 1)
+    assert len(preview_frames) == FRAME_COUNT
+    assert (preview_frames[0].width, preview_frames[0].height) == (1280, 720)
