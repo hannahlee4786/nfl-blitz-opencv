@@ -139,6 +139,56 @@ class TeamClassifierTests(unittest.TestCase):
         self.assertGreater(classified[0]["team_conf"], 0.95)
         self.assertGreater(classified[0]["color_coverage"], 0.95)
 
+    def test_bad_crop_cannot_flip_a_persistent_track_team(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        player_box = (20, 10, 30, 60)
+        x, y, width, height = _jersey_box(player_box)
+        frame[y:y + height, x:x + width] = (210, 35, 20)
+        tracks = [{"id": 4, "team": "red", "bbox": player_box}]
+
+        classified = _with_team_classification(
+            frame, tracks, (self.red, self.blue)
+        )
+
+        self.assertEqual(classified[0]["team_name"], "RED")
+        self.assertEqual(classified[0]["team_conf"], 0.0)
+
+    def test_drops_contradicted_track_on_opponent_body(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        box = (20, 10, 30, 60)
+        x, y, width, height = _jersey_box(box)
+        frame[y:y + height, x:x + width] = (210, 35, 20)
+        tracks = [
+            {"id": 4, "team": "red", "bbox": box},
+            {"id": 9, "team": "blue", "bbox": box},
+        ]
+
+        classified = _with_team_classification(
+            frame, tracks, (self.red, self.blue)
+        )
+
+        self.assertEqual([(track["id"], track["team_name"])
+                          for track in classified], [(9, "BLUE")])
+
+    def test_keeps_controlled_player_when_ball_skews_jersey_crop(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        box = (20, 10, 30, 60)
+        x, y, width, height = _jersey_box(box)
+        frame[y:y + height, x:x + width] = (10, 20, 210)
+        tracks = [
+            {"id": 2, "team": "red", "bbox": box},
+            {"id": 9, "team": "blue", "bbox": box, "main": True},
+        ]
+
+        classified = _with_team_classification(
+            frame, tracks, (self.red, self.blue)
+        )
+
+        self.assertIn(9, [track["id"] for track in classified])
+        main = next(track for track in classified if track["id"] == 9)
+        self.assertEqual(main["team_name"], "BLUE")
+        self.assertEqual(main["team_conf"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

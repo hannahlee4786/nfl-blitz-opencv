@@ -260,6 +260,88 @@ def _team_masks(hsv):
     return red, blue
 
 
+def _without_field_lines(mask):
+    """Remove long, thin team-colored field graphics from a color mask.
+
+    The arcade line of scrimmage and first-down line can share the red or
+    blue hue of a jersey. They cross most of the picture in a handful of
+    rows, unlike even a row of players. Find only long horizontal runs and
+    erase a narrow band around them; a jersey intersecting the graphic keeps
+    all of its pixels above and below the line.
+    """
+    clean = mask.astype(np.uint8).copy()
+    if clean.size == 0:
+        return clean.astype(bool)
+    width = clean.shape[1]
+    run = max(72, int(round(width * 0.055)))
+    joined = cv2.morphologyEx(
+        clean, cv2.MORPH_CLOSE, np.ones((1, 13), np.uint8))
+    lines = cv2.morphologyEx(
+        joined, cv2.MORPH_OPEN, np.ones((1, run), np.uint8))
+    if lines.any():
+        line_rows = lines.any(axis=1).astype(np.uint8)[:, None]
+        line_rows = cv2.dilate(line_rows, np.ones((7, 1), np.uint8))
+        clean[line_rows[:, 0] > 0, :] = 0
+    return clean.astype(bool)
+
+
+def _on_team_field_line(mask, bbox):
+    """True when a box's team color is mostly one long field graphic."""
+    x, y, bw, bh = [int(value) for value in bbox]
+    height, width = mask.shape
+    x0, x1 = max(0, x), min(width, x + max(1, bw))
+    y0, y1 = max(0, y), min(height, y + max(1, bh))
+    if x1 <= x0 or y1 <= y0:
+        return False
+    clean = _without_field_lines(mask)
+    raw_n = int(mask[y0:y1, x0:x1].sum())
+    body_n = int(clean[y0:y1, x0:x1].sum())
+    removed = raw_n - body_n
+    return removed >= 24 and body_n < 45 and removed > body_n * 1.5
+
+
+def _without_player_markers(mask, ring=None, arrow=None):
+    """Remove gameplay labels before a team-color mask is used as a body.
+
+    The selection ring and the numbered arrow deliberately use the same
+    saturated colors as a jersey. They are useful tracking landmarks, but
+    must never be allowed to claim an ordinary player's track. Keep this
+    separate from the quarterback handling so every player sees the same
+    cleaned mask.
+    """
+    clean = mask.astype(np.uint8).copy()
+    height, width = clean.shape
+    if ring is not None:
+        cx = int(round(ring["cx"]))
+        cy = int(round(ring["cy"]))
+        radius = float(ring.get("r") or 36.0)
+        axes = (int(max(12, radius * 1.35)),
+                int(max(10, radius * 0.90)))
+        if -axes[0] <= cx < width + axes[0] and -axes[1] <= cy < height + axes[1]:
+            cv2.ellipse(clean, (cx, cy), axes, 0, 0, 360, 0, -1)
+        # A perspective ring is much wider than its median radial score.
+        # Its component box is the reliable outer boundary when available.
+        if ring.get("bbox") is not None:
+            x, y, bw, bh = [int(v) for v in ring["bbox"]]
+            pad_x = max(4, int(bw * 0.10))
+            pad_y = max(6, int(bh * 0.40))
+            x0, x1 = max(0, x - pad_x), min(width, x + bw + pad_x)
+            y0, y1 = max(0, y - pad_y), min(height, y + bh + pad_y)
+            clean[y0:y1, x0:x1] = 0
+    if arrow is not None:
+        cx = float(arrow[0])
+        cy = float(arrow[1])
+        marker_h = float(arrow[2] if len(arrow) > 2 else 40.0)
+        half_w = max(24.0, marker_h * 0.90)
+        x0 = max(0, int(cx - half_w))
+        x1 = min(width, int(cx + half_w))
+        y0 = max(0, int(cy - marker_h * 0.75))
+        y1 = min(height, int(cy + marker_h * 0.75))
+        if x1 > x0 and y1 > y0:
+            clean[y0:y1, x0:x1] = 0
+    return clean.astype(bool)
+
+
 def _mask_components(mask):
     mm = cv2.morphologyEx(mask.astype(np.uint8) * 255, cv2.MORPH_CLOSE,
                           np.ones((5, 5), np.uint8))
@@ -272,6 +354,60 @@ def _mask_components(mask):
             continue
         out.append(dict(bbox=(x, y, bw, bh), area=area))
     return out
+
+
+def _without_head_fragments(comps):
+    """Drop a helmet-color fragment when the player's jersey is below it.
+
+    Large arcade helmets often contain a team-colored stripe. Perspective
+    and the silver shell separate that stripe from the jersey, so connected
+    components otherwise turn one player into two detections. The upper
+    component is discarded only when it is substantially smaller than a
+    vertically aligned lower component; two full jerseys remain separate.
+    """
+    drop = set()
+    for i, upper in enumerate(comps):
+        ux, uy, uw, uh = upper["bbox"]
+        ucx = ux + uw / 2.0
+        for j, lower in enumerate(comps):
+            if i == j:
+                continue
+            lx, ly, lw, lh = lower["bbox"]
+            if uy >= ly:
+                continue
+            gap = ly - (uy + uh)
+            if gap < -8 or gap > max(100, int(lh * 1.25)):
+                continue
+            # A helmet stripe is both shorter and much less substantial
+            # than the jersey. This prevents an aligned, distant player
+            # from being folded into the player nearer the camera.
+            if uh > max(48, int(lh * 0.55)):
+                continue
+            if upper["area"] > lower["area"] * 0.35:
+                continue
+            lcx = lx + lw / 2.0
+            if abs(ucx - lcx) > max(28.0, lw * 0.85):
+                continue
+            total_h = ly + lh - uy
+            if total_h > max(150, int(lh * 2.85)):
+                continue
+            drop.add(i)
+            break
+    return [comp for i, comp in enumerate(comps) if i not in drop]
+
+
+def _without_head_color(mask):
+    """Remove detached helmet-color pixels from a live tracking mask."""
+    components = _merge_fragments(_mask_components(mask))
+    kept = _without_head_fragments(components)
+    kept_ids = {id(comp) for comp in kept}
+    clean = mask.copy()
+    for comp in components:
+        if id(comp) in kept_ids:
+            continue
+        x, y, bw, bh = comp["bbox"]
+        clean[y:y + bh, x:x + bw] = False
+    return clean
 
 
 def _split_wide(mask, bbox):
@@ -732,9 +868,13 @@ def _jersey_bodies(mask, shape, hsv=None):
     """Player-shaped jerseys on this frame, with a box down to the feet."""
     height, width = shape[:2]
     bodies = []
-    for comp in _merge_vertical(_mask_components(mask), hsv=hsv):
+    components = _merge_vertical(_mask_components(mask), hsv=hsv)
+    components = _without_head_fragments(components)
+    for comp in components:
         x, y, bw, bh = comp["bbox"]
         if comp["area"] < 240 or bh < 18 or bw < 16 or bw > 150:
+            continue
+        if hsv is not None and _football_seed(hsv, comp["bbox"]):
             continue
         # The BLITZ letters share the blue mask. Their pixels are a lighter
         # hue than a jersey. A player standing on the letters still has
@@ -789,7 +929,14 @@ def _jersey_bodies(mask, shape, hsv=None):
                     sch, vch = hsv[..., 1], hsv[..., 2]
                     leg = float(((sch[y + bh:y1, x:x + bw] < 105)
                                  & (vch[y + bh:y1, x:x + bw] > 48)).mean())
-                    if leg < 0.15:
+                    # A tackled or airborne player can be sideways, so his
+                    # pants are beside the jersey instead of below it. A
+                    # substantial, broad jersey is still a body seed. The
+                    # logo/paint checks below reject broad field artwork.
+                    grounded = (comp["area"] >= 1000 and bw >= 50
+                                and bh >= 32 and bw >= 0.72 * bh
+                                and y > height * 0.24)
+                    if leg < 0.15 and not grounded:
                         continue
         if hsv is not None:
             sub = mask[y:y + bh, x:x + bw]
@@ -842,6 +989,8 @@ def _jersey_bodies(mask, shape, hsv=None):
         # on them has that paint and no jersey.
         if hsv is not None and (_on_field_logo(hsv, (nx, ny, nw, nh))
                                 or _on_endzone_letters(hsv, (nx, ny, nw, nh))):
+            continue
+        if hsv is not None and _on_football(hsv, (nx, ny, nw, nh)):
             continue
         bodies.append((nx, ny, nw, nh, cx, float(ny + nh)))
     return bodies
@@ -898,6 +1047,72 @@ def _on_ground_circle(hsv, box):
     jersey = float(((hh >= 114) & (hh < 130) & (ss > 80) & (vv > 55)).mean())
     ring = float(((hh > 98) & (hh < 128) & (ss > 140) & (vv > 100)).mean())
     return field > 0.72 and ring > 0.18 and ring > jersey
+
+
+def _football_seed(hsv, box):
+    """A tight red component shaped and shaded like the football sprite."""
+    height, width = hsv.shape[:2]
+    x, y, bw, bh = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    if bh < 18 or bh > 75 or bw < 1.35 * bh or bw < 28:
+        return False
+    x0, x1 = max(0, x), min(width, x + max(1, bw))
+    y0, y1 = max(0, y), min(height, y + max(1, bh))
+    if x1 - x0 < 12 or y1 - y0 < 12:
+        return False
+    patch = hsv[y0:y1, x0:x1]
+    hh, ss, vv = patch[..., 0], patch[..., 1], patch[..., 2]
+    red = ((hh < 12) | (hh > 168)) & (ss > 75) & (vv > 50)
+    warm = (hh < 18) & (ss > 55) & (vv > 90)
+    dark = vv < 70
+    return (int(red.sum()) >= 250
+            and float(red.mean()) < 0.90
+            and float(warm.mean()) > 0.22
+            and float(dark.mean()) < 0.10)
+
+
+def _on_football(hsv, box):
+    """True for the large red/brown football sprite moving over grass.
+
+    Motion blur makes the arcade football large enough to pass a simple
+    component-area test. Unlike a Tampa jersey, it is a short, broad oval
+    surrounded by field pixels, with most red/brown pixels in the lower
+    half and no dark helmet/torso structure.
+    """
+    height, width = hsv.shape[:2]
+    x, y, bw, bh = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    x0, x1 = max(0, x), min(width, x + max(1, bw))
+    y0, y1 = max(0, y), min(height, y + max(1, bh))
+    if x1 - x0 < 12 or y1 - y0 < 20:
+        return False
+    patch = hsv[y0:y1, x0:x1]
+    hh, ss, vv = patch[..., 0], patch[..., 1], patch[..., 2]
+    red = ((hh < 12) | (hh > 168)) & (ss > 75) & (vv > 50)
+    if int(red.sum()) < 300:
+        return False
+    # The ball can overlap a Dallas player. Person-span growth then turns
+    # the small oval into a tall box around that blue body, so inspect the
+    # original red components inside the box as well as the grown outline.
+    opened = cv2.morphologyEx(
+        red.astype(np.uint8) * 255, cv2.MORPH_CLOSE,
+        np.ones((3, 3), np.uint8))
+    count, _labels, stats, _centers = cv2.connectedComponentsWithStats(opened)
+    total_red = max(1, int(red.sum()))
+    for i in range(1, count):
+        sx, sy, sw, sh, area = [int(value) for value in stats[i]]
+        seed = (x0 + sx, y0 + sy, sw, sh)
+        if area >= 0.45 * total_red and _football_seed(hsv, seed):
+            return True
+    if bh > 145 or bw < 0.45 * bh or bw < 36 or bh < 50:
+        return False
+    field = (hh > 65) & (hh < 110) & (ss > 55) & (vv > 40)
+    warm = (hh < 18) & (ss > 55) & (vv > 90)
+    dark = vv < 70
+    mid = max(1, red.shape[0] // 2)
+    upper = int(red[:mid].sum())
+    lower = int(red[mid:].sum())
+    return (float(field.mean()) > 0.48
+            and lower > upper * 1.8
+            and (float(warm.mean()) > 0.10 or float(dark.mean()) < 0.08))
 
 
 def _slide_onto_white(hsv, box, opp):
@@ -1069,6 +1284,43 @@ def _on_white_sideline(hsv, box):
     while right < width - 1 and is_white(right + 1):
         right += 1
     return (right - left) > w + 40
+
+
+def _on_sideline_yard_marker(hsv, box):
+    """A narrow red triangular yard marker beside the white sideline."""
+    height, width = hsv.shape[:2]
+    x, y, w, h = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    if w < 20 or w > 54 or h < 120 or h > 230:
+        return False
+    x0, x1 = max(0, x), min(width, x + w)
+    y0, y1 = max(0, y), min(height, y + h)
+    if x1 <= x0 or y1 - y0 < 60:
+        return False
+    patch = hsv[y0:y1, x0:x1]
+    hh, ss, vv = patch[..., 0], patch[..., 1], patch[..., 2]
+    red = ((hh < 12) | (hh > 168)) & (ss > 75) & (vv > 50)
+    white = (ss < 90) & (vv > 150)
+    if float(red.mean()) < 0.06 or float(white.mean()) < 0.16:
+        return False
+    third = max(1, red.shape[0] // 3)
+    upper = float(red[:third].sum(axis=1).mean())
+    lower = float(red[-third:].sum(axis=1).mean())
+    if upper < 2.0 or lower > max(2.5, upper * 0.55):
+        return False
+
+    row = int(np.clip(y + h * 0.45, 0, height - 1))
+    white_row = (hsv[row, :, 1] < 90) & (hsv[row, :, 2] > 150)
+    xs = np.flatnonzero(white_row)
+    if xs.size == 0:
+        return False
+    cx = x + w / 2.0
+    for run in np.split(xs, np.where(np.diff(xs) > 1)[0] + 1):
+        if run.size < 60:
+            continue
+        distance = min(abs(float(run[0]) - cx), abs(float(run[-1]) - cx))
+        if distance <= 90:
+            return True
+    return False
 
 
 def _cover_head_feet(hsv, mask, x, y, bw, foot, shape):
@@ -1281,11 +1533,20 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
     height, width = frame.shape[:2]
     ring = _find_ring(hsv, hint, prev_r)
     marker = _find_marker(hsv, ring)
+    label_ring = ring
+    side_marker = None
+    if ring is not None and marker is not None:
+        mx, _my, mw, _mh = marker
+        # The horizontal control arrow sits at or left of the plaque. A real
+        # ground ring is well to its right, underneath the controlled body.
+        if ring["cx"] <= mx + mw + 40:
+            side_marker = marker
+            ring = None
     red, blue = _team_masks(hsv)
     avoid = np.zeros((height, width), np.uint8)
-    if ring is not None:
-        cv2.circle(avoid, (int(ring["cx"]), int(ring["cy"])),
-                   int(max(10, ring["r"] * 1.3)), 255, -1)
+    if label_ring is not None:
+        cv2.circle(avoid, (int(label_ring["cx"]), int(label_ring["cy"])),
+                   int(max(10, label_ring["r"] * 1.3)), 255, -1)
     if marker is not None:
         x, y, bw, bh = marker
         avoid[max(0, y - 8):min(height, y + bh + 10),
@@ -1301,7 +1562,9 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
         mask[avoid > 0] = False
         hard = mask.astype(np.uint8) * 255
         seeds = []
-        for comp in _merge_fragments(_mask_components(mask)):
+        components = _merge_fragments(_mask_components(mask))
+        components = _without_head_fragments(components)
+        for comp in components:
             seeds.extend(_split_wide(hard, comp["bbox"]))
         for x, y, bw, bh in seeds:
             if bw * bh < 700 or bh < 22 or bw > 170 or bw < 16:
@@ -1349,6 +1612,8 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
             best["bbox"] = (x, y, bw, max(10, yb - y))
             best["feet"] = (float(ring["cx"]), float(ring["cy"]))
             best["main"] = True
+    elif side_marker is not None:
+        _claim_side_marker_body(dets, side_marker)
     dets = sorted(dets, key=lambda d: -(d["bbox"][2] * d["bbox"][3]))
     kept = []
     for det in dets:
@@ -1535,6 +1800,44 @@ def _claim_arrow_body(frame, hsv, items, ring):
     if nh >= 36:
         best["bbox"] = (x, ny, bw, int(nh))
     best["main"] = True
+
+
+def _claim_side_marker_body(items, marker):
+    """Claim the QB beside the opening ``1`` plaque.
+
+    At the snap, the lower half of the real selection ring is hidden by the
+    down banner. The blue side-arrow beside the black ``1`` can therefore
+    look more ring-like than the real ring. The QB is the substantial blue
+    body immediately to the right of that plaque, not the arrow itself.
+    """
+    if marker is None:
+        return None
+    mx, my, mw, mh = marker
+    marker_right = mx + mw
+    marker_cy = my + mh / 2.0
+    choices = []
+    for det in items:
+        if det["team"] != "blue":
+            continue
+        x, y, bw, bh = det["bbox"]
+        cx = x + bw / 2.0
+        bottom = y + bh
+        dx = cx - marker_right
+        if not (35.0 <= dx <= 270.0):
+            continue
+        if y > marker_cy or bottom < my - 20 or bottom > my + mh + 100:
+            continue
+        # Prefer the full torso over a lower pants/ring fragment occupying
+        # the same column.
+        high_body = max(0.0, my - y)
+        score = (abs(bottom - marker_cy) + 0.45 * dx
+                 - 0.25 * min(high_body, 220.0) - 0.001 * bw * bh)
+        choices.append((score, det))
+    if not choices:
+        return None
+    best = min(choices, key=lambda item: item[0])[1]
+    best["main"] = True
+    return best
 
 
 # Set on the first frame of a clip. Clip 4's defense stands past midfield,
@@ -1855,11 +2158,20 @@ def select_roster(dets, per_team=7):
         main = [d for d in dets if d.get("main") and d["team"] == team]
         if not main:
             continue
-        have = any(_dist(main[0]["world"], b["world"]) < 0.8 for b in group)
+        anchor = main[0]
+        # The pants and visible half of the ring can form a second box in
+        # the QB's column at the snap. Once the jersey body is known, that
+        # overlapping lower fragment is not another roster player.
+        group = [
+            d for d in group
+            if d is anchor
+            or _iou_over_smaller(d["bbox"], anchor["bbox"]) <= 0.35
+        ]
+        have = any(_dist(anchor["world"], b["world"]) < 0.8 for b in group)
         if not have:
             if len(group) >= per_team:
                 group = group[:per_team - 1]
-            group = group + [main[0]]
+            group = group + [anchor]
         groups[team] = group
     for group in (groups["red"], groups["blue"]):
         for d in sorted(group, key=lambda d: d["world"][1]):
@@ -1920,6 +2232,10 @@ def _snap_body(frame, foot, team, reach=55.0):
     else:
         color = ((hch < 18) | (hch > 160)) & (sch > 35) & (vch > 35)
     body = (~field) & (vch > 45) & (sch > 15)
+    # A local recovery search must obey the same one-body rule as the main
+    # detector; otherwise a lost track can reacquire a detached helmet even
+    # though that fragment was removed from the frame-wide candidates.
+    color = _without_head_color(color)
     use = color.astype(np.uint8) * 255
     if int(use.sum()) < 400 * 255:
         if reach > 100:
@@ -2103,6 +2419,83 @@ def _arrow_has_digit(hsv, arrow):
     return False
 
 
+def _tight_qb_body(bodies, anchor, shape, mode="arrow", allow_below=True):
+    """Choose a jersey body near the QB marker without boxing the marker.
+
+    The control ring and the ``1`` marker locate the controlled player, but
+    neither is part of his sprite. During a jump, one leg can become a
+    narrow team-color component beside the torso. Join only that edge
+    fragment; an overlapping component above the torso is usually the
+    oversized helmet and must not stretch the box upward.
+    """
+    height, width = shape[:2]
+    ax, ay = float(anchor[0]), float(anchor[1])
+    choices = []
+    for index, body in enumerate(bodies):
+        bx, by, bw, bh, cx, fy = body
+        dx = abs(float(cx) - ax)
+        if dx > 150.0:
+            continue
+        area = max(1, int(bw) * int(bh))
+        narrow_penalty = max(0.0, 50.0 - float(bw)) * 2.0
+        if mode == "ring":
+            if fy < ay - 280.0 or fy > ay + 65.0:
+                continue
+            vertical = abs(float(fy) - ay)
+        else:
+            cy = by + bh / 2.0
+            above = (ay - 220.0 <= fy <= ay + 65.0
+                     and cy <= ay + 45.0)
+            below = (allow_below and fy >= ay + 30.0
+                     and cy >= ay - 10.0 and fy <= ay + 320.0)
+            if not above and not below:
+                continue
+            # For a jumping player the bottom of the sprite approaches the
+            # marker from above. Normally the top of the body begins just
+            # below the marker.
+            vertical = (abs(float(fy) - ay) if above
+                        else abs(float(by) - ay))
+        score = (dx + 0.30 * vertical + narrow_penalty
+                 - 0.0015 * min(area, 30000))
+        choices.append((score, index))
+    if not choices:
+        return None
+
+    _, primary_index = min(choices)
+    bx, by, bw, bh, _cx, _fy = bodies[primary_index]
+    x0, y0, x1, y1 = bx, by, bx + bw, by + bh
+
+    # A sideways leg may be a separate sliver touching the torso. Require
+    # edge contact and matching feet so a helmet component nested in the
+    # torso is not joined to the body.
+    for index, body in enumerate(bodies):
+        if index == primary_index:
+            continue
+        ox, oy, ow, oh, _ocx, _ofy = body
+        x_overlap = min(x1, ox + ow) - max(x0, ox)
+        y_overlap = min(y1, oy + oh) - max(y0, oy)
+        edge_contact = (-16 <= x_overlap
+                        <= max(10.0, 0.25 * min(x1 - x0, ow)))
+        same_height = y_overlap >= 0.35 * min(y1 - y0, oh)
+        same_feet = abs(y1 - (oy + oh)) <= 45
+        if edge_contact and same_height and same_feet:
+            x0, y0 = min(x0, ox), min(y0, oy)
+            x1, y1 = max(x1, ox + ow), max(y1, oy + oh)
+
+    body_cx = (x0 + x1) / 2.0
+    body_foot = float(y1)
+    body_h = max(1, y1 - y0)
+    pad_x = max(6, int(round(body_h * 0.06)))
+    pad_top = max(4, int(round(body_h * 0.035)))
+    pad_bottom = max(3, int(round(body_h * 0.025)))
+    x0 = max(0, int(x0 - pad_x))
+    x1 = min(width, int(x1 + pad_x))
+    y0 = max(0, int(y0 - pad_top))
+    y1 = min(height, int(y1 + pad_bottom))
+    return (x0, y0, max(1, x1 - x0), max(1, y1 - y0)), (
+        float(body_cx), body_foot)
+
+
 def _qb_body_under_arrow(hsv, mask, arrow, shape):
     """Jersey standing under the blue arrow. The '1' stays above the box.
 
@@ -2110,42 +2503,35 @@ def _qb_body_under_arrow(hsv, mask, arrow, shape):
     occupied. The player is the body below that chevron. Only the arrow
     that still has the digit above it is allowed to choose that body.
     """
-    if arrow is None or not _arrow_has_digit(hsv, arrow):
+    if arrow is None:
         return None
     height, width = shape[:2]
     ax, ay, abh = float(arrow[0]), float(arrow[1]), float(arrow[2])
-    best = None
-    best_dx = 80.0
-    for body in _jersey_bodies(mask, shape, hsv):
-        bx, by, bw, bh, cx, fy = body
-        cy = by + bh / 2.0
-        if cy < height * 0.20 or cy > height * 0.90:
-            continue
-        # The grown box can reach up over the chevron. The player is the
-        # one whose feet, and whose middle, sit under the arrow.
-        if fy < ay + 40 or cy < ay - 10:
-            continue
-        dx = abs(cx - ax)
-        if dx >= best_dx:
-            continue
+    has_digit = _arrow_has_digit(hsv, arrow)
+    clean = _without_head_color(_without_player_markers(mask, None, arrow))
+    bodies = []
+    for body in _jersey_bodies(clean, shape, hsv):
+        bx, by, bw, bh, _cx, _fy = body
         box = (int(bx), int(by), int(bw), int(bh))
-        if _on_field_logo(hsv, box):
+        if by + bh / 2.0 < height * 0.20 or by + bh / 2.0 > height * 0.90:
             continue
-        if _jersey_count(mask, box) < 40:
+        if _on_field_logo(hsv, box) or _jersey_count(clean, box) < 40:
             continue
-        best_dx = dx
-        best = body
-    if best is None:
+        bodies.append(body)
+    # With its digit visible, the marker may be above a grounded player.
+    # When the digit is hidden during a jump, accept only a substantial
+    # jersey immediately above it; this is the pose that used to make the
+    # ground circle become the quarterback's box.
+    result = _tight_qb_body(
+        bodies, (ax, ay), shape, mode="arrow", allow_below=has_digit)
+    if result is None:
         return None
-    bx, by, bw, bh, cx, fy = best
-    # The digit sits above the chevron. Do not let the box climb into it.
-    ny = int(max(by, ay - abh * 0.55))
-    nh = int(fy - ny)
-    if nh < 70:
-        return None
-    nx = int(round(cx - bw / 2.0))
-    nx = max(-20, min(width - 4, nx))
-    return (nx, ny, int(bw), nh), (float(cx), float(fy))
+    box, foot = result
+    if not has_digit:
+        _x, _y, bw, bh = box
+        if bw < 52 or bh < 90 or foot[1] > ay + 65:
+            return None
+    return box, foot
 
 
 def _qb_color(hch, sch, vch, team):
@@ -2197,19 +2583,32 @@ def _qb_from_foot(hsv, foot, shape, team="blue"):
 
 
 def _qb_box(hsv, ring, shape, team="blue"):
-    """Box the quarterback from his helmet down to the blue ring.
+    """Box the quarterback's body while using the ring only as a locator.
 
-    One gap is allowed for the silver pants between the jersey and the
-    ring. A second gap is the arrow above the helmet, and the walk stops
-    there so the box does not swallow the '1' marker.
+    The ring is the most reliable identity cue, but its pixels are not part
+    of the player. Prefer a full jersey body above it so the rendered box
+    cannot expand around the blue ground graphic.
     """
     height, width = shape[:2]
     cx = int(round(ring["cx"]))
     cy = int(round(ring["cy"]))
     rad = float(ring.get("r") or 36)
+    hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    jersey = _qb_color(hch, sch, vch, team)
+    clean = _without_head_color(_without_player_markers(jersey, ring))
+    bodies = [
+        body for body in _jersey_bodies(clean, shape, hsv)
+        if not _on_field_logo(hsv, body[:4])
+        and _jersey_count(clean, body[:4]) >= 40
+    ]
+    tight = _tight_qb_body(bodies, (cx, cy), shape, mode="ring")
+    if tight is not None:
+        return tight[0]
+
+    # If the jersey is fully occluded, retain a short-lived fallback above
+    # the ring. Its bottom deliberately stops before the ring begins.
     half = int(max(24, min(36, rad * 0.9)))
     x0, x1 = max(0, cx - half), min(width, cx + half)
-    hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     blue = _qb_color(hch, sch, vch, team)
     top = cy
     gap = 0
@@ -2231,7 +2630,7 @@ def _qb_box(hsv, ring, shape, team="blue"):
                 break
         row -= 2
     ny = max(0, top - 44)
-    foot = min(height - 4, int(cy + 0.22 * rad))
+    foot = min(height - 4, int(cy - max(8.0, 0.35 * rad)))
     nh = int(np.clip(foot - ny, 96, 220))
     ny = max(0, int(foot - nh))
     bw = int(np.clip(nh * 0.48, 42, 96))
@@ -2266,6 +2665,445 @@ def _window_conf(fused, tid, t, n):
     gap = _dist(fused[t][tid]["pos"], med)
     cover = len(pts) / float(hi - lo)
     return float(min(1.0, (0.25 + 0.75 * cover) * (0.35 + 0.65 * _agree(gap))))
+
+
+def _split_track_relation(a, b):
+    """How two same-team boxes can be pieces of one airborne player.
+
+    ``strong`` means the boxes cover nearly the same body and end at the
+    same image foot. ``adjacent`` handles the jump pose, where the legs and
+    torso separate into narrow left/right color regions. The latter is only
+    used with temporal evidence from strong overlap on nearby frames.
+    """
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    area_a = max(1, aw * ah)
+    area_b = max(1, bw * bh)
+    area_ratio = min(area_a, area_b) / float(max(area_a, area_b))
+    afx, afy = _foot_of(a)
+    bfx, bfy = _foot_of(b)
+    foot_gap = float(np.hypot(afx - bfx, afy - bfy))
+    height_ratio = min(ah, bh) / float(max(ah, bh, 1))
+    width_ratio = min(aw, bw) / float(max(aw, bw, 1))
+    fragment_shape = (area_ratio <= 0.84 or height_ratio <= 0.72
+                      or width_ratio <= 0.72)
+    strong = (_iou_over_smaller(a, b) >= 0.60
+              and foot_gap <= 40.0 and fragment_shape)
+
+    x_gap = max(ax, bx) - min(ax + aw, bx + bw)
+    y_overlap = min(ay + ah, by + bh) - max(ay, by)
+    min_h = max(1, min(ah, bh))
+    ux, uy, uw, uh = _box_union(a, b)
+    min_w, max_w = min(aw, bw), max(aw, bw)
+    narrow = min_w <= 44 and min_w <= 0.52 * max_w
+    broad_fragment = min_w <= 64 and min_w <= 0.65 * max_w
+    x_overlap = min(ax + aw, bx + bw) - max(ax, bx)
+    vertical_gap = max(0, max(ay, by) - min(ay + ah, by + bh))
+    side = (x_gap <= 12 and y_overlap >= 0.18 * min_h
+            and (narrow or broad_fragment) and uw <= 190 and uh <= 330)
+    separated_side = (x_gap <= 70 and y_overlap >= 0.42 * min_h
+                      and narrow and uw <= 220 and uh <= 280)
+    stacked = (x_overlap >= 0.18 * max(1, min_w)
+               and vertical_gap <= 105 and fragment_shape
+               and uw <= 190 and uh <= 430)
+    adjacent = side or separated_side or stacked
+    return strong, adjacent
+
+
+def _collapse_split_tracks(fused, team_of, support_window=18):
+    """Make left/right fragments of one airborne player own one track ID.
+
+    A strict overlapping-frame match establishes that two IDs have latched
+    onto the same body. Nearby side-by-side split frames may then be joined,
+    and a short gap uses the ID whose box was consistently the fuller body.
+    This temporal requirement keeps two real adjacent teammates separate.
+    """
+    evidence = {}
+    larger_votes = {}
+    for t, row in enumerate(fused):
+        tids = list(row)
+        for i, left in enumerate(tids):
+            for right in tids[i + 1:]:
+                if team_of.get(left) != team_of.get(right):
+                    continue
+                strong, _ = _split_track_relation(
+                    row[left]["bbox"], row[right]["bbox"])
+                if not strong:
+                    continue
+                pair = tuple(sorted((left, right)))
+                evidence.setdefault(pair, []).append(t)
+                a = row[left]["bbox"]
+                b = row[right]["bbox"]
+                larger = left if a[2] * a[3] >= b[2] * b[3] else right
+                larger_votes.setdefault(pair, {pair[0]: 0, pair[1]: 0})[larger] += 1
+
+    preferred = {}
+    episodes = {}
+    for pair, frames in evidence.items():
+        votes = larger_votes[pair]
+        preferred[pair] = max(pair, key=lambda tid: (votes[tid], tid))
+        if len(frames) >= 2 and frames[-1] - frames[0] <= support_window * 2:
+            episodes[pair] = (frames[0], frames[-1])
+
+    # Keep one stable number through a short occluded frame between two
+    # confirmed duplicate frames.
+    for pair, (first, last) in episodes.items():
+        winner = preferred[pair]
+        loser = pair[0] if winner == pair[1] else pair[1]
+        for t in range(first, last + 1):
+            row = fused[t]
+            if winner not in row and loser in row:
+                row[winner] = row.pop(loser)
+
+    for t, row in enumerate(fused):
+        changed = True
+        while changed:
+            changed = False
+            tids = list(row)
+            for i, left in enumerate(tids):
+                for right in tids[i + 1:]:
+                    if team_of.get(left) != team_of.get(right):
+                        continue
+                    strong, adjacent = _split_track_relation(
+                        row[left]["bbox"], row[right]["bbox"])
+                    pair = tuple(sorted((left, right)))
+                    near_evidence = any(
+                        abs(t - frame) <= support_window
+                        for frame in evidence.get(pair, ()))
+                    if not strong and not (adjacent and near_evidence):
+                        continue
+                    keep = preferred.get(pair)
+                    if keep not in (left, right):
+                        a = row[left]["bbox"]
+                        b = row[right]["bbox"]
+                        keep = left if a[2] * a[3] >= b[2] * b[3] else right
+                    drop = right if keep == left else left
+                    row[keep]["bbox"] = _box_union(
+                        row[keep]["bbox"], row[drop]["bbox"])
+                    row[keep]["conf"] = max(
+                        row[keep]["conf"], row[drop]["conf"])
+                    del row[drop]
+                    changed = True
+                    break
+                if changed:
+                    break
+    return fused
+
+
+def _collapse_handoff_tracks(fused, team_of, window=4):
+    """Remove the brief overlap when one ID hands a body to another ID.
+
+    Real teammates remain present on both sides of a close encounter. An ID
+    handoff instead has one history ending as the other begins, with both
+    boxes occupying the same small image/world neighborhood for a frame or
+    two.
+    """
+    n = len(fused)
+    for t, row in enumerate(fused):
+        changed = True
+        while changed:
+            changed = False
+            tids = list(row)
+            for i, left in enumerate(tids):
+                for right in tids[i + 1:]:
+                    if team_of.get(left) != team_of.get(right):
+                        continue
+                    a, b = row[left], row[right]
+                    if _dist(a["pos"], b["pos"]) > 4.5:
+                        continue
+                    abox, bbox = a["bbox"], b["bbox"]
+                    ac = (abox[0] + abox[2] / 2.0,
+                          abox[1] + abox[3] / 2.0)
+                    bc = (bbox[0] + bbox[2] / 2.0,
+                          bbox[1] + bbox[3] / 2.0)
+                    ux, uy, uw, uh = _box_union(abox, bbox)
+                    close = (_iou_over_smaller(abox, bbox) > 0.08
+                             or float(np.hypot(ac[0] - bc[0], ac[1] - bc[1])) < 110)
+                    if not close or uw > 240 or uh > 380:
+                        continue
+
+                    def presence(tid, lo, hi):
+                        return sum(tid in fused[k] for k in range(lo, hi))
+
+                    lo, hi = max(0, t - window), min(n, t + window + 1)
+                    lp = presence(left, lo, t)
+                    rp = presence(right, lo, t)
+                    lf = presence(left, t + 1, hi)
+                    rf = presence(right, t + 1, hi)
+                    handoff = ((lp >= 2 and rf >= 2 and (rp <= 1 or lf <= 1))
+                               or (rp >= 2 and lf >= 2 and (lp <= 1 or rf <= 1)))
+                    if not handoff:
+                        continue
+                    keep = max(
+                        (left, right),
+                        key=lambda tid: (
+                            presence(tid, t + 1, hi),
+                            presence(tid, lo, t),
+                            row[tid]["bbox"][2] * row[tid]["bbox"][3],
+                        ))
+                    drop = right if keep == left else left
+                    del row[drop]
+                    changed = True
+                    break
+                if changed:
+                    break
+    return fused
+
+
+def _repair_fragment_tracks(fused, team_of, main_id, shape, rings, arrows):
+    """Snap foot/paint fragments to an unclaimed full jersey body.
+
+    A tackle can leave optical flow attached to one shoe while the torso
+    moves sideways. Long field graphics can produce the same small stale
+    box. Full-sized boxes are left alone; only a short or narrow box with no
+    body support is eligible. Temporal feet select one nearby unclaimed body,
+    and an unsupported fragment is removed instead of being drawn as a
+    player.
+    """
+    height, _ = shape[:2]
+    marker_hold = {}
+    cap = cv2.VideoCapture(CLIP)
+    for t, row in enumerate(fused):
+        ok, frame = _take(cap)
+        if not ok:
+            break
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        raw_red, raw_blue = _team_masks(hsv)
+        red, blue = raw_red, raw_blue
+        red = _without_head_color(_without_player_markers(
+            red, rings[t] if t < len(rings) else None))
+        blue = _without_head_color(_without_player_markers(
+            blue, rings[t] if t < len(rings) else None))
+
+        for team, mask, raw_mask in (
+                ("red", red, raw_red), ("blue", blue, raw_blue)):
+            opponent = raw_blue if team == "red" else raw_red
+            bodies = [
+                body for body in _jersey_bodies(mask, shape, hsv)
+                if not _on_team_field_line(raw_mask, body[:4])
+                and not _on_ground_circle(hsv, body[:4])
+                and not (team == "red"
+                         and _on_sideline_yard_marker(hsv, body[:4]))
+            ]
+            metadata = {}
+            hits = {j: [] for j in range(len(bodies))}
+            for tid, item in list(row.items()):
+                if team_of.get(tid) != team:
+                    continue
+                box = item["bbox"]
+                on_line = _on_team_field_line(raw_mask, box)
+                direct_marker = (team == "red"
+                                 and _on_sideline_yard_marker(hsv, box))
+                on_marker = direct_marker
+                if team == "red" and not direct_marker and tid in marker_hold:
+                    mx, my, seen = marker_hold[tid]
+                    cx = box[0] + box[2] / 2.0
+                    cy = box[1] + box[3] / 2.0
+                    on_marker = (t - seen <= 36 and box[2] < 60
+                                 and box[3] >= 100
+                                 and float(np.hypot(cx - mx, cy - my)) < 180.0)
+                if on_marker:
+                    marker_hold[tid] = (
+                        box[0] + box[2] / 2.0,
+                        box[1] + box[3] / 2.0,
+                        t,
+                    )
+                on_circle = _on_ground_circle(hsv, box)
+                on_ball = team == "red" and _on_football(hsv, box)
+                own_n = _jersey_count(mask, box)
+                opponent_n = _jersey_count(opponent, box)
+                cross_overlap = any(
+                    team_of.get(other) != team
+                    and _iou_over_smaller(box, other_item["bbox"]) > 0.18
+                    for other, other_item in row.items()
+                )
+                opponent_fragment = (opponent_n >= 160
+                                     and opponent_n > own_n * 1.05
+                                     and (box[2] < 56 or cross_overlap))
+                invalid = (on_line or on_marker or on_circle or on_ball
+                           or opponent_fragment)
+                overlaps = [
+                    j for j, body in enumerate(bodies)
+                    if _iou_over_smaller(box, body[:4]) > 0.12
+                ]
+                metadata[tid] = (box, own_n, invalid, on_marker, on_ball,
+                                 opponent_fragment, overlaps)
+                if not invalid:
+                    for j in overlaps:
+                        hits[j].append(tid)
+
+            # One detected jersey body has one owner. A small fragment that
+            # overlaps the same body cannot keep a second number.
+            owner = {}
+            for j, tids in hits.items():
+                body = bodies[j]
+                body_area = max(1, body[2] * body[3])
+
+                def ownership_score(tid):
+                    box = metadata[tid][0]
+                    area = max(1, box[2] * box[3])
+                    size_match = min(area, body_area) / float(max(area, body_area))
+                    main_bonus = 0.05 if tid == main_id else 0.0
+                    return (_iou_over_smaller(box, body[:4])
+                            + 0.35 * size_match + main_bonus)
+
+                if tids:
+                    owner[j] = max(tids, key=ownership_score)
+
+            owned = set(owner)
+            valid_tids = set(owner.values())
+            suspect = []
+            for tid, (box, own_n, invalid, on_marker, on_ball,
+                      opponent_fragment, overlaps) in metadata.items():
+                if tid in valid_tids and not invalid:
+                    continue
+                duplicate = bool(overlaps) and not invalid
+                _, y, bw, bh = box
+                small = (bw < 56 or bh < 80 or bw * bh < 4600)
+                low = own_n < 45
+                # A distant upright player may be narrow, but the foot/line
+                # failure happens on the lower field and lacks a body seed.
+                hard_invalid = invalid or duplicate
+                repairable = not (
+                    on_marker or on_ball or opponent_fragment or duplicate)
+                if (y + bh / 2.0 > height * 0.28
+                        and (hard_invalid or small or low)):
+                    suspect.append(
+                        (tid, small, low, hard_invalid, repairable))
+
+            choices = []
+            for tid, _small, _low, _invalid, repairable in suspect:
+                if not repairable:
+                    continue
+                box = row[tid]["bbox"]
+                refs = [(_foot_of(box), 0)]
+                for gap in range(1, 9):
+                    for k in (t - gap, t + gap):
+                        if not (0 <= k < len(fused)):
+                            continue
+                        nearby = fused[k].get(tid)
+                        if nearby is None:
+                            continue
+                        nb = nearby["bbox"]
+                        if nb[2] >= 50 and nb[3] >= 75 and nb[2] * nb[3] >= 4200:
+                            refs.append((_foot_of(nb), gap))
+                for j, body in enumerate(bodies):
+                    if j in owned:
+                        continue
+                    score = min(
+                        float(np.hypot(body[4] - foot[0], body[5] - foot[1]))
+                        + gap * 8.0
+                        for foot, gap in refs)
+                    if score <= 220.0:
+                        choices.append((score, tid, j))
+
+            assigned_tids = set()
+            for _score, tid, j in sorted(choices):
+                if tid in assigned_tids or j in owned or tid not in row:
+                    continue
+                bx, by, bw, bh, _fx, _fy = bodies[j]
+                row[tid]["bbox"] = (int(bx), int(by), int(bw), int(bh))
+                assigned_tids.add(tid)
+                owned.add(j)
+
+            for tid, small, low, invalid, _repairable in suspect:
+                if (tid in row and tid not in assigned_tids
+                        and (small or low or invalid)):
+                    del row[tid]
+    cap.release()
+    return fused
+
+
+def _tighten_main_track_boxes(fused, team_of, main_id, shape, rings, arrows):
+    """Make the final controlled-player box follow his jersey, not the ring.
+
+    Split-track fusion can union a correct airborne torso box with an older
+    coasted box whose bottom is still on the ground marker. This final pass
+    runs after every fusion step and changes only the displayed box; the
+    ring-derived field position remains intact.
+    """
+    if main_id is None:
+        return fused
+    cap = cv2.VideoCapture(CLIP)
+    for t, row in enumerate(fused):
+        ok, frame = _take(cap)
+        if not ok:
+            break
+        if main_id not in row:
+            continue
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        red, blue = _team_masks(hsv)
+        own = red if team_of.get(main_id) == "red" else blue
+        ring = rings[t] if t < len(rings) else None
+        arrow = arrows[t] if t < len(arrows) else None
+        clean = _without_head_color(_without_player_markers(own, ring, arrow))
+        current = row[main_id]["bbox"]
+        bodies = []
+        for body in _jersey_bodies(clean, shape, hsv):
+            if _iou_over_smaller(current, body[:4]) <= 0.10:
+                continue
+            if (_on_field_logo(hsv, body[:4])
+                    or _on_ground_circle(hsv, body[:4])
+                    or _jersey_count(clean, body[:4]) < 40):
+                continue
+            bodies.append(body)
+        if not bodies:
+            continue
+        x, y, bw, bh = current
+        anchor = (x + bw / 2.0, y + bh)
+        tight = _tight_qb_body(bodies, anchor, shape, mode="ring")
+        if tight is not None:
+            row[main_id]["bbox"] = tight[0]
+    cap.release()
+    return fused
+
+
+def _fill_main_track_gaps(fused, main_id, max_gap=3):
+    """Interpolate very short controlled-player gaps caused by occlusion.
+
+    The ball can briefly cover the airborne quarterback's small jersey mask.
+    Only fill gaps bounded by detections of the same persistent track, so this
+    cannot create a new player from the ball, field marker, or another team.
+    """
+    if main_id is None:
+        return fused
+
+    t = 0
+    while t < len(fused):
+        if main_id in fused[t]:
+            t += 1
+            continue
+        start = t
+        while t < len(fused) and main_id not in fused[t]:
+            t += 1
+        end = t
+        left = start - 1
+        if (left < 0 or end >= len(fused)
+                or end - start > max_gap
+                or main_id not in fused[left]):
+            continue
+
+        before = fused[left][main_id]
+        after = fused[end][main_id]
+        span = float(end - left)
+        for frame_idx in range(start, end):
+            alpha = (frame_idx - left) / span
+
+            def lerp_pair(key):
+                a = before[key]
+                b = after[key]
+                return tuple(float(x + (y - x) * alpha)
+                             for x, y in zip(a, b))
+
+            box = tuple(int(round(x)) for x in lerp_pair("bbox"))
+            fused[frame_idx][main_id] = {
+                "bbox": box,
+                "pos": lerp_pair("pos"),
+                "world": lerp_pair("world"),
+                "conf": float(before["conf"] +
+                              (after["conf"] - before["conf"]) * alpha),
+            }
+    return fused
 
 
 def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arrows=None):
@@ -2313,7 +3151,16 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
     prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY) if ok0 else None
     prev_field = _field_mask(prev_frame) if ok0 else None
     if ok0:
-        prev_red, prev_blue = _team_masks(cv2.cvtColor(prev_frame, cv2.COLOR_BGR2HSV))
+        prev_hsv = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2HSV)
+        prev_red, prev_blue = _team_masks(prev_hsv)
+        prev_ring = rings[0] if rings else None
+        # Arrow candidates can briefly resemble a jersey plus a white
+        # number. The existing arrow/body checks handle them; only the
+        # geometrically verified ground ring is safe to erase globally.
+        prev_red = _without_player_markers(prev_red, prev_ring)
+        prev_blue = _without_player_markers(prev_blue, prev_ring)
+        prev_red = _without_head_color(prev_red)
+        prev_blue = _without_head_color(prev_blue)
     else:
         prev_red = prev_blue = None
     flow_hits = flow_tries = 0
@@ -2322,7 +3169,14 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
         if not ok:
             break
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        cur_red, cur_blue = _team_masks(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV))
+        ring = rings[t] if t < len(rings) else None
+        arrow = arrows[t] if t < len(arrows) else None
+        tracking_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        cur_red, cur_blue = _team_masks(tracking_hsv)
+        cur_red = _without_player_markers(cur_red, ring)
+        cur_blue = _without_player_markers(cur_blue, ring)
+        cur_red = _without_head_color(cur_red)
+        cur_blue = _without_head_color(cur_blue)
         held_at = {
             tid: (img[tid], last[tid], vel[tid], img_vel[tid], box_of[tid],
                   solo[tid], planted[tid], off[tid], bare[tid],
@@ -2357,8 +3211,6 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             img_vel[tid] = (du, dv)
             shift_of[tid] = (du, dv)
         got = _assign_image(preds, per_frame[t], gate=48)
-        ring = rings[t] if t < len(rings) else None
-        arrow = arrows[t] if t < len(arrows) else None
         peak_locked = set()
         peak_undo = {}
         hsv_live = None
@@ -2378,7 +3230,8 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                     landed = None
                 else:
                     box = _qb_from_foot(hsv_now, guide, shape, team_of[tid])
-                    landed = _qb_body_under_arrow(hsv_now, cur_blue, arrow, shape)
+                    own = cur_red if team_of[tid] == "red" else cur_blue
+                    landed = _qb_body_under_arrow(hsv_now, own, arrow, shape)
                     if landed is not None:
                         box, guide = landed
                 # A false arrow sits on empty grass. The real one stands over
@@ -2387,7 +3240,7 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 # the upper field that still has a jersey under it.
                 empty = ring is None and landed is None and (
                     _mostly_grass(hsv_now, box)
-                    or _jersey_count(cur_blue, box) < 40
+                    or _jersey_count(own, box) < 40
                     or (box[1] + box[3] / 2.0) < height * 0.20)
                 if empty and ring is None:
                     best = None
@@ -2400,13 +3253,13 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                         if not _arrow_has_digit(hsv_now, hit_arrow):
                             continue
                         landed_alt = _qb_body_under_arrow(
-                            hsv_now, cur_blue, hit_arrow, shape)
+                            hsv_now, own, hit_arrow, shape)
                         if landed_alt is None:
                             continue
                         alt_box, alt = landed_alt
                         if _mostly_grass(hsv_now, alt_box):
                             continue
-                        jer = _jersey_count(cur_blue, alt_box)
+                        jer = _jersey_count(own, alt_box)
                         if jer < best_j:
                             continue
                         best_j = jer
@@ -3315,6 +4168,59 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 fwd[t][tid] = dict(
                     team=team_of[tid], world=world, bbox=box,
                     coasted=True, frac=0.4, width_yd=1.0)
+        # Recovery, optical flow, and pile handling run after the first body
+        # assignment pass. Validate their results too: a short box ending at
+        # the top of a full body is a helmet fragment, not another player.
+        # If no number owns the body, put this number back on the whole body;
+        # otherwise discard the duplicate. A marker-only box has no body in
+        # the cleaned masks and is discarded for every non-main track.
+        for team, bodies in (("red", red_bodies), ("blue", blue_bodies)):
+            for tid in list(fwd[t]):
+                if tid == main_id or team_of.get(tid) != team:
+                    continue
+                box = fwd[t][tid]["bbox"]
+                overlaps = [
+                    body for body in bodies
+                    if _iou_over_smaller(box, body[:4]) > 0.12
+                ]
+                if not overlaps:
+                    if _on_label(box, ring, arrow, shape):
+                        _revert(tid)
+                        del fwd[t][tid]
+                    continue
+                body = max(
+                    overlaps,
+                    key=lambda item: _iou_over_smaller(box, item[:4]))
+                _fx, fy = _foot_of(box)
+                body_gap = body[5] - fy
+                if body_gap <= max(30.0, body[3] * 0.28):
+                    continue
+                owned = False
+                for other, item in fwd[t].items():
+                    if other == tid or team_of.get(other) != team:
+                        continue
+                    ofx, ofy = _foot_of(item["bbox"])
+                    if (_iou_over_smaller(item["bbox"], body[:4]) > 0.12
+                            and abs(ofx - body[4]) < max(24.0, body[2] * 0.45)
+                            and abs(ofy - body[5]) <= max(30.0, body[3] * 0.28)):
+                        owned = True
+                        break
+                if owned:
+                    _revert(tid)
+                    del fwd[t][tid]
+                    continue
+                bx, by, bw, bh, bfx, bfy = body
+                full = (int(bx), int(by), int(bw), int(bh))
+                # When a player stands in the selection ring, the ring is a
+                # ground-plane foot landmark, not a second body.
+                if ring is not None:
+                    near_x = abs(bfx - ring["cx"]) < max(70.0, bw)
+                    foot_gap = ring["cy"] - bfy
+                    if near_x and 0 <= foot_gap < 110:
+                        full = (int(bx), int(by), int(bw),
+                                int(max(bh, ring["cy"] - by)))
+                        bfx, bfy = float(ring["cx"]), float(ring["cy"])
+                _put(tid, full, float(bfx), float(bfy))
         prev_gray = gray
         prev_field = _field_mask(frame)
         prev_red, prev_blue = cur_red, cur_blue
@@ -3453,6 +4359,15 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 fused[t][tid]["pos"] = (px + (nx - px) * scale,
                                         py + (ny - py) * scale)
 
+    fused = _collapse_split_tracks(fused, team_of)
+    fused = _repair_fragment_tracks(
+        fused, team_of, main_id, shape, rings, arrows)
+    fused = _collapse_split_tracks(fused, team_of)
+    fused = _collapse_handoff_tracks(fused, team_of)
+    fused = _tighten_main_track_boxes(
+        fused, team_of, main_id, shape, rings, arrows)
+    fused = _fill_main_track_gaps(fused, main_id)
+
     tracks = []
     for t in range(n):
         frame_tracks = []
@@ -3468,7 +4383,8 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             trail.reverse()
             frame_tracks.append(dict(
                 id=tid, team=team_of[tid], pos=item["pos"], conf=item["conf"],
-                trail=trail, bbox=item["bbox"], world=item["world"]))
+                trail=trail, bbox=item["bbox"], world=item["world"],
+                main=(tid == main_id)))
         tracks.append(frame_tracks)
     return tracks
 
@@ -3496,15 +4412,39 @@ def _jersey_box(player_box):
     return left, top, jersey_width, jersey_height
 
 
+def _tracked_team_labels(prototypes):
+    """Map the persistent red/blue tracker teams to calibration labels."""
+    if prototypes is None:
+        return {}
+    first, second = prototypes
+
+    def hue_gap(hue, target):
+        gap = abs(float(hue) - float(target))
+        return min(gap, 180.0 - gap)
+
+    direct = hue_gap(first.hsv[0], 0.0) + hue_gap(second.hsv[0], 120.0)
+    swapped = hue_gap(second.hsv[0], 0.0) + hue_gap(first.hsv[0], 120.0)
+    if direct <= swapped:
+        return {"red": first.label, "blue": second.label}
+    return {"red": second.label, "blue": first.label}
+
+
 def _with_team_classification(frame, tracks, prototypes):
-    """Add single-frame jersey evidence to already-associated tracks."""
+    """Add jersey evidence without allowing a track's team to flip.
+
+    Player association already has a persistent red/blue identity from the
+    opening roster. A bad crop during a tackle may lower confidence, but it
+    must not rename that Tampa track as Dallas (or vice versa).
+    """
     if prototypes is None:
         return tracks
 
     team_a, team_b = prototypes
-    classified = []
+    labels = _tracked_team_labels(prototypes)
+    evidence = []
     for track in tracks:
         item = dict(track)
+        expected = labels.get(track.get("team"), "UNKNOWN")
         try:
             result = classify_jersey_region(
                 crop_region(frame, _jersey_box(track["bbox"])),
@@ -3512,17 +4452,37 @@ def _with_team_classification(frame, tracks, prototypes):
                 team_b,
             )
         except ValueError:
+            raw_label = "UNKNOWN"
+            raw_conf = 0.0
             item.update(
-                team_name="UNKNOWN",
+                team_name=expected,
                 team_conf=0.0,
                 color_coverage=0.0,
             )
         else:
+            raw_label = result.label
+            raw_conf = result.confidence
             item.update(
-                team_name=result.label,
-                team_conf=result.confidence,
+                team_name=expected,
+                team_conf=(result.confidence
+                           if result.label == expected else 0.0),
                 color_coverage=result.matched_fraction,
             )
+        evidence.append((item, raw_label, raw_conf))
+
+    classified = []
+    for item, raw_label, raw_conf in evidence:
+        expected = item["team_name"]
+        contradicted = (raw_label not in ("UNKNOWN", expected)
+                        and raw_conf >= 0.75
+                        and item["color_coverage"] >= 0.25)
+        occupied_by_opponent = any(
+            other["team"] != item["team"]
+            and _iou_over_smaller(item["bbox"], other["bbox"]) > 0.12
+            for other, _label, _conf in evidence
+        )
+        if contradicted and occupied_by_opponent and not item.get("main"):
+            continue
         classified.append(item)
     return classified
 
