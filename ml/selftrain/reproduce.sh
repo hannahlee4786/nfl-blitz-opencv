@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 # End-to-end self-training: leakage split, YOLO11m teacher cache, pseudo labels,
 # YOLO11n student (12 epochs), Clip-4 checkpoint/threshold selection, Clip 64 held out.
-# Large artifacts: /Users/starfengsmac/Downloads/nfl-ml/selftrain/
-# Review overlays: /tmp/ml_st/pseudo_review/ and /tmp/ml_st/student_review/
+# Large artifacts: ${NFL_ML_HOME:-$ROOT/.nfl-ml}/selftrain/
+# Review overlays: ${NFL_ML_HOME:-$ROOT/.nfl-ml}/scratch/pseudo_review/ and student_review/
 #
 # macOS has no setsid. Long jobs are started in a new session so they survive
 # the launching shell, and caffeinate -i -s keeps the machine awake.
 set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ML_HOME="${NFL_ML_HOME:-$ROOT/.nfl-ml}"
+export NFL_ML_HOME="$ML_HOME"
 export KMP_DUPLICATE_LIB_OK=TRUE
-export HF_HOME=/Users/starfengsmac/Downloads/nfl-ml/models/hf
-export HUGGINGFACE_HUB_CACHE=/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub
-export YOLO_CONFIG_DIR=/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics
+export HF_HOME="${HF_HOME:-$ML_HOME/hf}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$ML_HOME/hf/hub}"
+export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-$ML_HOME/Ultralytics}"
 export OMP_NUM_THREADS=8
 export MKL_NUM_THREADS=8
 export PYTHONUNBUFFERED=1
-PY=/Users/starfengsmac/Downloads/nfl-ml/.venv/bin/python
-ROOT=/Users/starfengsmac/Downloads/nfl-blitz-opencv-pipeline
-ART=/Users/starfengsmac/Downloads/nfl-ml/selftrain
+PY="${NFL_PYTHON:-$ROOT/.venv/bin/python}"
+ART="$ML_HOME/selftrain"
+SCRATCH="$ML_HOME/scratch"
 cd "$ROOT"
-mkdir -p "$ART/logs" /tmp/ml_st
+mkdir -p "$ART/logs" "$SCRATCH"
 
 # Detach a command into its own session. Prints the leader PID.
 # Usage: detach <pidfile> <logfile> -- <cmd...>
@@ -44,10 +47,9 @@ PY
 
 "$PY" -u ml/selftrain/leakage.py --mae-threshold 5.0
 "$PY" -u ml/selftrain/cache_video.py --mode teacher --which trainval \
-  --weights /Users/starfengsmac/Downloads/nfl-ml/models/yolo11m.pt \
+  --weights "$ROOT/models/yolo11m.pt" \
   --imgsz 640 --conf 0.05 --batch 1
 "$PY" -u ml/selftrain/pseudo_labels.py --round 1 --team-source hsv
-# Overlays live in /tmp and disappear after reboot:
 "$PY" -u ml/selftrain/pseudo_labels.py --round 1 --review-only
 
 # Fresh 12-epoch student (skip if last.pt already exists and you only need resume).

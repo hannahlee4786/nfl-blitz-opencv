@@ -4,7 +4,7 @@
 # Usage: ml/run_pipeline.sh <clip4|clip64|video path> <out_dir> [extra track_clip4 args]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OLDPY="/Users/starfengsmac/Downloads/[MIDWAY] NFL Blitz 2000/.venv/bin/python"
+PY="${NFL_PYTHON:-$ROOT/.venv/bin/python}"
 V4="$ROOT/data/input/Clip_4 Camera Swing and Distance Change Test.mp4"
 V64="$ROOT/data/input/Clip 64.mov"
 
@@ -37,7 +37,7 @@ done
 cd "$ROOT"
 export PYTHONUNBUFFERED=1
 set -o pipefail
-"$OLDPY" pipeline/track_clip4.py \
+"$PY" pipeline/track_clip4.py \
   --video "$VIDEO" \
   --out-dir "$OUT" \
   --player-boxes "$OUT/player_boxes.csv" \

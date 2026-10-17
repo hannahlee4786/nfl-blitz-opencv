@@ -1,32 +1,20 @@
 """Paths and environment for the self-training pipeline.
 
-Large artifacts live under ART. The repo only holds this code.
+Large artifacts live under ART inside the ML home directory.
 """
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-os.environ.setdefault("HF_HOME", "/Users/starfengsmac/Downloads/nfl-ml/models/hf")
-os.environ.setdefault(
-    "HUGGINGFACE_HUB_CACHE",
-    "/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub",
-)
-os.environ.setdefault(
-    "YOLO_CONFIG_DIR",
-    "/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics",
-)
+from ml.paths import REPO, footage_dir, ml_home, models_dir, python_bin
 
-REPO = Path("/Users/starfengsmac/Downloads/nfl-blitz-opencv-pipeline")
-PY = Path("/Users/starfengsmac/Downloads/nfl-ml/.venv/bin/python")
-OLD_PY = Path("/Users/starfengsmac/Downloads/[MIDWAY] NFL Blitz 2000/.venv/bin/python")
-FOOTAGE = REPO / "data/drive-download-20261016T223913Z-1-001"
-ART = Path("/Users/starfengsmac/Downloads/nfl-ml/selftrain")
-SCRATCH = Path("/tmp/ml_st")
-MODELS = Path("/Users/starfengsmac/Downloads/nfl-ml/models")
+PY = python_bin()
+FOOTAGE = footage_dir()
+ART = ml_home() / "selftrain"
+SCRATCH = ml_home() / "scratch"
+MODELS = models_dir()
 SPLITS = ART / "splits.json"
 YOLO11M = MODELS / "yolo11m.pt"
 YOLO11N = MODELS / "yolo11n.pt"

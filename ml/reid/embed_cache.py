@@ -17,7 +17,8 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from ml.reid.model import Embedder  # noqa: E402
+from ml.paths import reid_weights  # noqa: E402
+from ml.reid.model import load_embedder  # noqa: E402
 from ml.reid.train import MEAN, STD, torso  # noqa: E402
 
 CROP_H = 128
@@ -45,7 +46,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Cache re-id embeddings for a detection stem.")
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--video", type=Path, required=True)
-    parser.add_argument("--weights", type=Path, required=True)
+    parser.add_argument("--weights", type=Path, default=reid_weights())
     parser.add_argument("--batch", type=int, default=32)
     args = parser.parse_args()
     rows = list(csv.DictReader(args.cache.with_suffix(".csv").open()))
@@ -57,10 +58,7 @@ def main() -> int:
             print(f"reid cache complete, skipping {out}", flush=True)
             return 0
     torch.set_num_threads(6)
-    model = Embedder()
-    state = torch.load(args.weights, map_location="cpu")
-    model.load_state_dict(state["model"])
-    model.eval()
+    model = load_embedder(args.weights)
     by_frame: dict[int, list[int]] = {}
     for index, row in enumerate(rows):
         by_frame.setdefault(int(row["frame"]), []).append(index)

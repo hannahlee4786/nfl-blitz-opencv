@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a tracklet embedding. Checkpoints land under nfl-ml/reid so a reboot can resume."""
+"""Train a tracklet embedding. Checkpoints land under $NFL_ML_HOME/reid so a reboot can resume."""
 
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from ml.reid.eval_retrieval import load_manifest, tracklet_retrieval  # noqa: E402
+from ml.paths import ml_home  # noqa: E402
 from ml.reid.model import Embedder, batch_hard_triplet  # noqa: E402
 
-ROOT = Path("/Users/starfengsmac/Downloads/nfl-ml/reid")
+ROOT = ml_home() / "reid"
 DATA = ROOT / "dataset"
 CKPT = ROOT / "checkpoints"
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -163,11 +164,14 @@ def main() -> int:
     train_rows = load_rows("train")
     val_rows = load_manifest(DATA / "val.jsonl")
     CKPT.mkdir(parents=True, exist_ok=True)
-    model = Embedder()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
     start_epoch = 0
     best = -1.0
     resume = CKPT / "last.pt"
+    if resume.is_file():
+        model = Embedder(pretrained=False)
+    else:
+        model = Embedder(pretrained=True)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
     if resume.is_file():
         state = torch.load(resume, map_location="cpu")
         model.load_state_dict(state["model"])

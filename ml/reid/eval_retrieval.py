@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -114,7 +115,12 @@ def load_manifest(path: Path) -> list[dict]:
 
 
 def main() -> int:
-    root = Path("/Users/starfengsmac/Downloads/nfl-ml/reid")
+    repo = Path(__file__).resolve().parents[2]
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    from ml.paths import ml_home
+
+    root = ml_home() / "reid"
     records = load_manifest(root / "dataset" / "val.jsonl")
     emb_path = root / "val_embeddings.npy"
     ids_path = root / "val_emb_ids.json"

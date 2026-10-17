@@ -1,19 +1,36 @@
 # NFL Blitz OpenCV pipeline
 
-This branch is the OpenCV tracking pipeline. It reads a gameplay video and estimates where the camera is on the field, then where each player is standing. Game files, footage, and extracted textures are not part of this branch. You supply the video locally.
+## Quickstart
+
+Clone the repository, then run setup from the repository root. `./setup.sh` creates `.venv` on Python 3.12, installs the pinned packages in `requirements.txt`, and downloads `models/yolo11m.pt`.
+
+```bash
+git clone <this-repo> nfl-blitz-opencv-pipeline
+cd nfl-blitz-opencv-pipeline
+./setup.sh
+```
+
+Put the labeled videos in `data/input/`:
+
+```text
+data/input/Clip_4 Camera Swing and Distance Change Test.mp4
+data/input/Clip 64.mov
+```
+
+Run Clip 4 and score the boxes:
+
+```bash
+bash ml/run_pipeline.sh clip4 data/output/clip4
+.venv/bin/python tools/eval_tracking.py --labels data/labels/clip4.json --boxes data/output/clip4/boxes.csv
+```
+
+This branch reads a gameplay video and estimates where the camera is on the field, then where each player is standing. Game files, footage, and extracted textures stay outside the repository. You supply the video locally.
 
 Run every command from the repository root.
 
 ## Setup
-Create a virtual environment and install the two libraries the pipeline uses.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-```
-
-`requirements.txt` lists `opencv-python` and `numpy`.
+`./setup.sh` is the install path. It uses `uv` when that command is on `PATH`, and `python3.12 -m venv` otherwise. Running it again reinstalls the same pins and skips the YOLO download when the file hash already matches.
 
 Put the video here:
 

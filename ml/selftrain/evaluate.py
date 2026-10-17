@@ -2,7 +2,7 @@
 """Select a student checkpoint on Clip 4 and score Clip 4 and Clip 64.
 
 Detection threshold and tracking low/high are chosen on Clip 4 only.
-The mandated scorer is tools/eval_tracking.py under the old project venv.
+The scorer is tools/eval_tracking.py, run with the same Python that launched this script.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ml.detect import clip_xyxy, labeled_frame_ids, read_frames
 from ml.track_assoc import DEFAULTS, run as assoc_run
 from tools.eval_tracking import box_iou, hungarian, load_boxes, load_labels
 from ml.selftrain.cache_video import cache_one, load_model
-from ml.selftrain.common import ART, OLD_PY, REPO, SCRATCH, TEST, ensure_dirs
+from ml.selftrain.common import ART, REPO, SCRATCH, TEST, ensure_dirs
 
 COARSE = [0.08, 0.12, 0.18, 0.25, 0.35, 0.45, 0.60]
 BOX_FIELDS = ["frame", "id", "team", "x", "y", "w", "h", "conf"]
@@ -85,7 +85,7 @@ def score_csv(labels: Path, boxes: Path, json_out: Path) -> dict:
     json_out.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         [
-            str(OLD_PY),
+            sys.executable,
             str(REPO / "tools/eval_tracking.py"),
             "--labels",
             str(labels),
@@ -309,8 +309,6 @@ def stage_select(round_n: int, reselect: bool, only: list[str] | None, tag: str)
     if dest.is_file() and not reselect:
         print(f"using existing selection {dest}", flush=True)
         return json.loads(dest.read_text())
-    if not OLD_PY.is_file():
-        raise RuntimeError(f"missing scorer python {OLD_PY}")
     labels4 = TEST["clip4"]["labels"]
     video4 = TEST["clip4"]["video"]
     candidates = []

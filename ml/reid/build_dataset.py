@@ -18,10 +18,11 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from ml.paths import ml_home  # noqa: E402
 from ml.selftrain.common import ART, SPLITS, footage_path  # noqa: E402
 from ml.track_assoc import DEFAULTS, associate_clean, build_frames, load_cache  # noqa: E402
 
-OUT = Path("/Users/starfengsmac/Downloads/nfl-ml/reid/dataset")
+OUT = ml_home() / "reid" / "dataset"
 CROP_H = 128
 CROP_W = 64
 MIN_OBS = 10

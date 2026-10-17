@@ -8,16 +8,31 @@ from torch import nn
 
 
 class Embedder(nn.Module):
-    def __init__(self, backbone: str = "resnet18") -> None:
+    def __init__(self, backbone: str = "resnet18", pretrained: bool = True) -> None:
         super().__init__()
         import timm
 
-        self.backbone = timm.create_model(backbone, pretrained=True, num_classes=0, global_pool="avg")
+        self.backbone_name = backbone
+        self.backbone = timm.create_model(backbone, pretrained=pretrained, num_classes=0, global_pool="avg")
         width = int(self.backbone.num_features)
         self.fc = nn.Linear(width, 128)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return F.normalize(self.fc(self.backbone(images)), dim=1)
+
+
+def load_embedder(weights, backbone: str = "resnet18") -> Embedder:
+    """Load an inference or training checkpoint without downloading ImageNet weights."""
+    state = torch.load(weights, map_location="cpu")
+    blob = state
+    name = backbone
+    if isinstance(state, dict) and "model" in state:
+        blob = state["model"]
+        name = str(state.get("backbone", backbone))
+    model = Embedder(backbone=name, pretrained=False)
+    model.load_state_dict(blob)
+    model.eval()
+    return model
 
 
 def batch_hard_triplet(emb: torch.Tensor, labels: torch.Tensor, margin: float = 0.2) -> torch.Tensor:

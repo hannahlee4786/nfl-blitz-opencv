@@ -3,14 +3,16 @@
 # Usage: ml/run_tracker.sh <clip4|clip64|video path> <out_csv>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="/Users/starfengsmac/Downloads/nfl-ml/.venv/bin/python"
+PY="${NFL_PYTHON:-$ROOT/.venv/bin/python}"
+ML_HOME="${NFL_ML_HOME:-$ROOT/.nfl-ml}"
+export NFL_ML_HOME="$ML_HOME"
 export KMP_DUPLICATE_LIB_OK=TRUE
-export HF_HOME="/Users/starfengsmac/Downloads/nfl-ml/models/hf"
-export HUGGINGFACE_HUB_CACHE="/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub"
-export YOLO_CONFIG_DIR="/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics"
-export NFL_ML_CACHE="${NFL_ML_CACHE:-/Users/starfengsmac/Downloads/nfl-ml/cache}"
-W="/Users/starfengsmac/Downloads/nfl-ml/reid/checkpoints/best.pt"
-WEIGHTS="/Users/starfengsmac/Downloads/nfl-ml/models/yolo11m.pt"
+export HF_HOME="${HF_HOME:-$ML_HOME/hf}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$ML_HOME/hf/hub}"
+export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-$ML_HOME/Ultralytics}"
+export NFL_ML_CACHE="${NFL_ML_CACHE:-$ML_HOME/cache}"
+W="${NFL_REID_WEIGHTS:-$ROOT/models/reid_resnet18.pt}"
+WEIGHTS="$ROOT/models/yolo11m.pt"
 V4="$ROOT/data/input/Clip_4 Camera Swing and Distance Change Test.mp4"
 V64="$ROOT/data/input/Clip 64.mov"
 

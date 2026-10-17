@@ -13,21 +13,17 @@ Blank cells are metrics that were not part of the recorded summary for that run.
 
 ## How to run
 
-The learned steps use Python 3.12 at `/Users/starfengsmac/Downloads/nfl-ml/.venv/bin/python`. The field pipeline uses Python 3.14 at `/Users/starfengsmac/Downloads/[MIDWAY] NFL Blitz 2000/.venv/bin/python`. Set `PYTHONUNBUFFERED=1` for the field script. The learned process needs:
+`./setup.sh` creates one Python 3.12 environment at `.venv`. Detection, re-ID, association, and `pipeline/track_clip4.py` all use `${NFL_PYTHON:-$ROOT/.venv/bin/python}`. The field script runs with `PYTHONUNBUFFERED=1`.
 
-```
-export KMP_DUPLICATE_LIB_OK=TRUE
-export HF_HOME=/Users/starfengsmac/Downloads/nfl-ml/models/hf
-export HUGGINGFACE_HUB_CACHE=/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub
-export YOLO_CONFIG_DIR=/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics
-export NFL_ML_CACHE=/Users/starfengsmac/Downloads/nfl-ml/cache
-```
+Caches and library download folders live under `${NFL_ML_HOME:-$ROOT/.nfl-ml}`. The scripts set `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, and `YOLO_CONFIG_DIR` inside that directory. `NFL_ML_CACHE` defaults to `$NFL_ML_HOME/cache`.
 
 `ml/run_pipeline.sh` detects, embeds, associates, projects the boxes, and writes automatic team colors. A finished detection cache and a finished embedding cache are reused. The field script reuses `homography.npz` when that file is already in the output directory.
 
 ```
 bash ml/run_pipeline.sh clip4 data/output/clip4
 bash ml/run_pipeline.sh clip64 data/output/clip64
+.venv/bin/python tools/eval_tracking.py --labels data/labels/clip4.json --boxes data/output/clip4/boxes.csv
+.venv/bin/python tools/eval_tracking.py --labels data/labels/clip64.json --boxes data/output/clip64/boxes.csv
 ```
 
 An arbitrary video is `bash ml/run_pipeline.sh /path/to/video.mp4 /path/to/out_dir`. The cache name is the file stem. `ml/detect_all.py` accepts `--video` for that case. Named clips `clip4` and `clip64` keep the previous video paths. Extra arguments after the output directory are passed to `pipeline/track_clip4.py`. The script already passes `--anchor -15` unless you pass `--anchor` yourself.
@@ -36,7 +32,7 @@ To rebuild the detection cache, delete `$NFL_ML_CACHE/det/<clip>_yolo11m.meta.js
 
 ## Where the artifacts live
 
-The torch environment, YOLO weights, and Hugging Face cache are under `/Users/starfengsmac/Downloads/nfl-ml`. Detection caches are `$NFL_ML_CACHE/det/clip4_yolo11m*` and `clip64_yolo11m*`, with the default cache root `/Users/starfengsmac/Downloads/nfl-ml/cache`. The re-ID checkpoint is `/Users/starfengsmac/Downloads/nfl-ml/reid/checkpoints/best.pt`. YOLO11m weights are `/Users/starfengsmac/Downloads/nfl-ml/models/yolo11m.pt`. Training crops and the embedding run stay off Clip 4 and Clip 64. The sequence is `ml/reid/reproduce.sh`. Shipped videos, `boxes.csv`, and `positions.csv` are in `data/output/clip4/` and `data/output/clip64/`.
+The virtual environment is `.venv`. YOLO11m weights are `models/yolo11m.pt` (downloaded by `setup.sh`). The re-ID weights shipped with the repo are `models/reid_resnet18.pt`. Detection caches are `$NFL_ML_HOME/cache/det/clip4_yolo11m*` and `clip64_yolo11m*`. Training crops and the embedding run stay off Clip 4 and Clip 64. The sequence is `ml/reid/reproduce.sh`, and its outputs stay under `$NFL_ML_HOME`. Shipped `boxes.csv` and `positions.csv` are in `data/output/clip4/` and `data/output/clip64/`. Input videos are gitignored and belong in `data/input/`. Footage for self-training defaults to `data/drive-download-*/`, or to `NFL_FOOTAGE_DIR` when that variable is set.
 
 ## Field positions
 

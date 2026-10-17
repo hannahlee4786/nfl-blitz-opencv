@@ -23,22 +23,16 @@ import sys
 import time
 from pathlib import Path
 
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-os.environ.setdefault("HF_HOME", "/Users/starfengsmac/Downloads/nfl-ml/models/hf")
-os.environ.setdefault(
-    "HUGGINGFACE_HUB_CACHE",
-    "/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub",
-)
-os.environ.setdefault(
-    "YOLO_CONFIG_DIR",
-    "/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics",
-)
+REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from ml.paths import models_dir  # noqa: E402
 
 import cv2
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
-MODELS = Path("/Users/starfengsmac/Downloads/nfl-ml/models")
+MODELS = models_dir()
 CLIPS = {
     "clip4": {
         "video": REPO / "data/input/Clip_4 Camera Swing and Distance Change Test.mp4",

@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from ml.paths import cache_root  # noqa: E402
 from ml.detect import (  # noqa: E402
     CLIPS,
     GdinoDetector,
@@ -212,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path(os.environ.get("NFL_ML_CACHE", "/Users/starfengsmac/Downloads/nfl-ml/cache")) / "det",
+        default=cache_root() / "det",
     )
     parser.add_argument("--limit", type=int, default=0, help="If >0, only the first N frames (debug).")
     args = parser.parse_args(argv)

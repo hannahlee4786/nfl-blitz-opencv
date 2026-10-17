@@ -1,4 +1,7 @@
 .venv/
+.nfl-ml/
+models/*.pt
+!models/reid_resnet18.pt
 __pycache__/
 *.pyc
 .DS_Store

@@ -1,29 +1,30 @@
 #!/bin/bash
 # Self-supervised player re-id and the Clip-4-chosen tracker.
-# Detection caches and crops stay under /Users/starfengsmac/Downloads/nfl-ml.
-# Never trains on Clip 4 or Clip 64 (the labeled test videos).
+# Detection caches and crops stay under ${NFL_ML_HOME:-$ROOT/.nfl-ml}.
+# Training stays off Clip 4 and Clip 64 (the labeled test videos).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PY="/Users/starfengsmac/Downloads/nfl-ml/.venv/bin/python"
-OLD="/Users/starfengsmac/Downloads/[MIDWAY] NFL Blitz 2000/.venv/bin/python"
+PY="${NFL_PYTHON:-$ROOT/.venv/bin/python}"
+ML_HOME="${NFL_ML_HOME:-$ROOT/.nfl-ml}"
+export NFL_ML_HOME="$ML_HOME"
 export KMP_DUPLICATE_LIB_OK=TRUE
-export HF_HOME="/Users/starfengsmac/Downloads/nfl-ml/models/hf"
-export HUGGINGFACE_HUB_CACHE="/Users/starfengsmac/Downloads/nfl-ml/models/hf/hub"
-export YOLO_CONFIG_DIR="/Users/starfengsmac/Downloads/nfl-ml/models/Ultralytics"
-export NFL_ML_CACHE="${NFL_ML_CACHE:-/Users/starfengsmac/Downloads/nfl-ml/cache}"
-W="/Users/starfengsmac/Downloads/nfl-ml/reid/checkpoints/best.pt"
-STUDENT="/Users/starfengsmac/Downloads/nfl-ml/selftrain/runs/round1/weights/best.pt"
-STU_CACHE="/Users/starfengsmac/Downloads/nfl-ml/selftrain/student_cache/round9_imgsz640"
+export HF_HOME="${HF_HOME:-$ML_HOME/hf}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$ML_HOME/hf/hub}"
+export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-$ML_HOME/Ultralytics}"
+export NFL_ML_CACHE="${NFL_ML_CACHE:-$ML_HOME/cache}"
+W="${NFL_REID_WEIGHTS:-$ROOT/models/reid_resnet18.pt}"
+STUDENT="$ML_HOME/selftrain/runs/round1/weights/best.pt"
+STU_CACHE="$ML_HOME/selftrain/student_cache/round9_imgsz640"
 V4="$ROOT/data/input/Clip_4 Camera Swing and Distance Change Test.mp4"
 V64="$ROOT/data/input/Clip 64.mov"
-SCORE="/Users/starfengsmac/Downloads/nfl-ml/reid/score"
+SCORE="$ML_HOME/reid/score"
 cd "$ROOT"
 
 # 1. YOLO11m test caches (skipped when meta is complete) and the student caches.
 mkdir -p "$NFL_ML_CACHE/det" "$SCORE"
 for clip in clip4 clip64; do
   "$PY" ml/detect_all.py --clip "$clip" --detector yolo \
-    --weights /Users/starfengsmac/Downloads/nfl-ml/models/yolo11m.pt \
+    --weights "$ROOT/models/yolo11m.pt" \
     --imgsz 640 --conf 0.05 --tag yolo11m --out-dir "$NFL_ML_CACHE/det"
 done
 "$PY" ml/selftrain/cache_video.py --mode student --which test \
@@ -55,7 +56,7 @@ track_score() {
   local clip="$1" cache="$2" tag="$3"
   shift 3
   "$PY" ml/track_assoc.py --cache "$cache" --out "$SCORE/${clip}_${tag}.csv" "${TRACK[@]}" "$@"
-  "$OLD" tools/eval_tracking.py --labels "data/labels/${clip}.json" \
+  "$PY" tools/eval_tracking.py --labels "data/labels/${clip}.json" \
     --boxes "$SCORE/${clip}_${tag}.csv" --json-out "$SCORE/${clip}_${tag}.score.json" \
     > "$SCORE/${clip}_${tag}.txt"
 }
@@ -67,9 +68,9 @@ for clip in clip4 clip64; do
   track_score "$clip" "$STU_CACHE/$clip" stu_reid "${REID[@]}"
 done
 
-mkdir -p /Users/starfengsmac/Downloads/nfl-ml/review/reid
+mkdir -p "$ML_HOME/review/reid"
 "$PY" ml/review_tracks.py --clip clip4 --boxes "$SCORE/clip4_yolo_reid.csv" \
-  --frames 0,30,60,120,180,240 --out-dir /Users/starfengsmac/Downloads/nfl-ml/review/reid
+  --frames 0,30,60,120,180,240 --out-dir "$ML_HOME/review/reid"
 "$PY" ml/review_tracks.py --clip clip64 --boxes "$SCORE/clip64_yolo_reid.csv" \
-  --frames 0,60,120,180,240,300 --out-dir /Users/starfengsmac/Downloads/nfl-ml/review/reid
+  --frames 0,60,120,180,240,300 --out-dir "$ML_HOME/review/reid"
 echo "scores in $SCORE"
