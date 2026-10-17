@@ -1,0 +1,2962 @@
+{
+  "video": "data/input/Clip_4 Camera Swing and Distance Change Test.mp4",
+  "crop_x0": 0,
+  "frames": {
+    "0": [
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          88,
+          446,
+          136,
+          176
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          402,
+          386,
+          126,
+          162
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          422,
+          452,
+          132,
+          196
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          542,
+          406,
+          136,
+          200
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          662,
+          400,
+          150,
+          206
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          752,
+          440,
+          168,
+          208
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          858,
+          422,
+          188,
+          238
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          6,
+          560,
+          158,
+          220
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          372,
+          578,
+          146,
+          214
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          488,
+          512,
+          126,
+          214
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          616,
+          484,
+          128,
+          252
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          744,
+          512,
+          146,
+          198
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          878,
+          486,
+          166,
+          224
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "10": [
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          112,
+          448,
+          132,
+          172
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          412,
+          398,
+          120,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          438,
+          468,
+          124,
+          188
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          568,
+          478,
+          70,
+          155
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          676,
+          458,
+          140,
+          182
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          798,
+          418,
+          124,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          898,
+          418,
+          142,
+          188
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          12,
+          558,
+          148,
+          214
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          388,
+          572,
+          148,
+          212
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          496,
+          508,
+          124,
+          212
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          602,
+          498,
+          128,
+          242
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          758,
+          498,
+          138,
+          192
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          898,
+          462,
+          152,
+          212
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "20": [
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          118,
+          398,
+          128,
+          168
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          368,
+          418,
+          122,
+          162
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          456,
+          448,
+          122,
+          188
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          558,
+          468,
+          114,
+          182
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          676,
+          456,
+          134,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          788,
+          388,
+          122,
+          164
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          896,
+          418,
+          148,
+          186
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          16,
+          556,
+          144,
+          210
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          396,
+          568,
+          148,
+          214
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          500,
+          486,
+          124,
+          214
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          606,
+          496,
+          128,
+          238
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          762,
+          496,
+          134,
+          188
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          906,
+          446,
+          154,
+          218
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "30": [
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          122,
+          396,
+          122,
+          168
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          388,
+          428,
+          112,
+          154
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          448,
+          448,
+          122,
+          184
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          566,
+          466,
+          114,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          696,
+          456,
+          124,
+          172
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          796,
+          416,
+          114,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          896,
+          426,
+          144,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          12,
+          552,
+          142,
+          210
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          396,
+          576,
+          148,
+          204
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          506,
+          496,
+          128,
+          204
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          626,
+          486,
+          124,
+          244
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          756,
+          496,
+          134,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          906,
+          456,
+          144,
+          204
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "40": [
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          0,
+          508,
+          90,
+          202
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          92,
+          444,
+          104,
+          164
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          316,
+          450,
+          114,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          348,
+          458,
+          82,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          420,
+          465,
+          140,
+          185
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          586,
+          470,
+          108,
+          174
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          656,
+          486,
+          98,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          712,
+          486,
+          108,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          778,
+          508,
+          70,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          682,
+          656,
+          132,
+          198
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          872,
+          456,
+          118,
+          108
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          922,
+          396,
+          128,
+          168
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1030,
+          466,
+          154,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "50": [
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          0,
+          388,
+          82,
+          164
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          52,
+          336,
+          98,
+          144
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          196,
+          356,
+          104,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          456,
+          476,
+          134,
+          184
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          486,
+          536,
+          104,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          596,
+          416,
+          104,
+          154
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          746,
+          418,
+          82,
+          162
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          696,
+          446,
+          104,
+          154
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          748,
+          424,
+          84,
+          126
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          840,
+          300,
+          90,
+          155
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1005,
+          300,
+          85,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1125,
+          360,
+          85,
+          145
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          676,
+          636,
+          124,
+          214
+        ],
+        "main": true,
+        "hidden": false
+      }
+    ],
+    "60": [
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          28,
+          282,
+          84,
+          144
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          68,
+          272,
+          88,
+          138
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          196,
+          282,
+          108,
+          144
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          586,
+          406,
+          88,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          636,
+          382,
+          98,
+          144
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          666,
+          376,
+          104,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          716,
+          410,
+          98,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          738,
+          366,
+          92,
+          142
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          570,
+          590,
+          140,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          690,
+          676,
+          124,
+          198
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          935,
+          258,
+          75,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1030,
+          240,
+          118,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1110,
+          276,
+          138,
+          148
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "70": [
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          128,
+          196,
+          74,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          188,
+          206,
+          84,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          228,
+          188,
+          72,
+          112
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1035,
+          185,
+          95,
+          145
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          620,
+          340,
+          96,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          680,
+          348,
+          90,
+          128
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          740,
+          360,
+          84,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          720,
+          420,
+          100,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          600,
+          440,
+          90,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          676,
+          636,
+          116,
+          204
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1020,
+          245,
+          85,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "80": [
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          196,
+          150,
+          118,
+          138
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          676,
+          306,
+          84,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          696,
+          326,
+          94,
+          114
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          726,
+          366,
+          84,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          706,
+          386,
+          94,
+          114
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          716,
+          426,
+          114,
+          158
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          500,
+          570,
+          150,
+          230
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          886,
+          206,
+          94,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          936,
+          170,
+          114,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          980,
+          200,
+          80,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "90": [
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          315,
+          150,
+          85,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          752,
+          230,
+          100,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          900,
+          150,
+          80,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          980,
+          160,
+          80,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          690,
+          355,
+          80,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          755,
+          340,
+          85,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          780,
+          340,
+          90,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          800,
+          390,
+          90,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          680,
+          470,
+          110,
+          150
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          392,
+          585,
+          108,
+          210
+        ],
+        "main": true,
+        "hidden": false
+      }
+    ],
+    "100": [
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          312,
+          130,
+          70,
+          108
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          390,
+          120,
+          60,
+          85
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          446,
+          130,
+          64,
+          84
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          298,
+          578,
+          152,
+          192
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          716,
+          396,
+          94,
+          134
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          750,
+          205,
+          62,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          852,
+          322,
+          78,
+          118
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          902,
+          332,
+          78,
+          138
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          866,
+          166,
+          56,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          918,
+          172,
+          60,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          952,
+          302,
+          88,
+          162
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          616,
+          456,
+          104,
+          138
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "110": [
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          350,
+          116,
+          70,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          402,
+          120,
+          58,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          520,
+          126,
+          60,
+          88
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          848,
+          188,
+          82,
+          122
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          900,
+          200,
+          80,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          968,
+          262,
+          82,
+          112
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          960,
+          340,
+          90,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          912,
+          322,
+          78,
+          118
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          648,
+          442,
+          88,
+          128
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          568,
+          462,
+          112,
+          142
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          242,
+          562,
+          142,
+          208
+        ],
+        "main": true,
+        "hidden": false
+      }
+    ],
+    "120": [
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          108,
+          552,
+          118,
+          175
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          446,
+          110,
+          64,
+          102
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          518,
+          128,
+          54,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          548,
+          458,
+          105,
+          170
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          638,
+          442,
+          78,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          916,
+          174,
+          56,
+          86
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          966,
+          188,
+          58,
+          86
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          990,
+          206,
+          62,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          1006,
+          328,
+          90,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          1056,
+          332,
+          72,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          888,
+          384,
+          100,
+          165
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "130": [
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          122,
+          568,
+          128,
+          188
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          618,
+          148,
+          58,
+          78
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          928,
+          268,
+          82,
+          112
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1028,
+          178,
+          62,
+          98
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1112,
+          198,
+          58,
+          98
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          1072,
+          312,
+          78,
+          122
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          900,
+          440,
+          100,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          500,
+          470,
+          100,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          540,
+          460,
+          90,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          552,
+          108,
+          64,
+          84
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "140": [
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          138,
+          572,
+          122,
+          192
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          436,
+          466,
+          84,
+          114
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          448,
+          425,
+          80,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1060,
+          158,
+          44,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1082,
+          152,
+          58,
+          84
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1152,
+          162,
+          64,
+          94
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          1066,
+          276,
+          84,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          662,
+          136,
+          58,
+          74
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          832,
+          262,
+          74,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          752,
+          322,
+          94,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          746,
+          412,
+          104,
+          124
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          622,
+          76,
+          42,
+          98
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          586,
+          78,
+          40,
+          92
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "150": [
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          202,
+          558,
+          128,
+          165
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          348,
+          452,
+          78,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          306,
+          438,
+          52,
+          128
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          724,
+          156,
+          52,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          734,
+          226,
+          58,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          682,
+          322,
+          84,
+          112
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          660,
+          402,
+          78,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1142,
+          118,
+          50,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue88",
+        "team": "blue",
+        "box": [
+          1186,
+          136,
+          68,
+          92
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1026,
+          242,
+          86,
+          135
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          1052,
+          272,
+          88,
+          105
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1086,
+          128,
+          52,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          596,
+          62,
+          48,
+          62
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          634,
+          64,
+          58,
+          84
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "160": [
+      {
+        "person": "red72",
+        "team": "red",
+        "box": [
+          262,
+          548,
+          122,
+          192
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue79",
+        "team": "blue",
+        "box": [
+          348,
+          548,
+          122,
+          202
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue8",
+        "team": "blue",
+        "box": [
+          232,
+          762,
+          152,
+          254
+        ],
+        "main": true,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          548,
+          546,
+          132,
+          192
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          640,
+          36,
+          62,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          690,
+          36,
+          48,
+          104
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          772,
+          186,
+          66,
+          90
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          808,
+          240,
+          58,
+          126
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          844,
+          362,
+          82,
+          132
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1308,
+          116,
+          48,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1172,
+          302,
+          76,
+          144
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          1216,
+          308,
+          76,
+          160
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1270,
+          124,
+          42,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "170": [
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          592,
+          512,
+          118,
+          178
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red22",
+        "team": "red",
+        "box": [
+          945,
+          500,
+          110,
+          175
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue73",
+        "team": "blue",
+        "box": [
+          900,
+          495,
+          100,
+          160
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          490,
+          290,
+          95,
+          155
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          468,
+          370,
+          95,
+          155
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1255,
+          195,
+          40,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1325,
+          210,
+          31,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          468,
+          90,
+          52,
+          80
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          508,
+          92,
+          55,
+          85
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1215,
+          215,
+          35,
+          95
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "180": [
+      {
+        "person": "red77",
+        "team": "red",
+        "box": [
+          22,
+          812,
+          154,
+          204
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red99",
+        "team": "red",
+        "box": [
+          0,
+          450,
+          75,
+          170
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue22",
+        "team": "blue",
+        "box": [
+          55,
+          530,
+          95,
+          165
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          990,
+          328,
+          78,
+          138
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1080,
+          310,
+          80,
+          142
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1148,
+          308,
+          82,
+          145
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red55",
+        "team": "red",
+        "box": [
+          175,
+          155,
+          70,
+          115
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          220,
+          155,
+          78,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "190": [
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          810,
+          490,
+          155,
+          185
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          895,
+          500,
+          125,
+          180
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "200": [
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1035,
+          490,
+          160,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          980,
+          555,
+          190,
+          130
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "210": [
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1080,
+          575,
+          165,
+          165
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1188,
+          570,
+          160,
+          170
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          0,
+          415,
+          80,
+          145
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "220": [
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1065,
+          520,
+          145,
+          170
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          990,
+          455,
+          165,
+          100
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "230": [
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          986,
+          378,
+          68,
+          108
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          1012,
+          432,
+          60,
+          112
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1265,
+          485,
+          91,
+          140
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "240": [
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          0,
+          348,
+          42,
+          128
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          990,
+          340,
+          95,
+          170
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red91",
+        "team": "red",
+        "box": [
+          1005,
+          300,
+          85,
+          110
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "red56",
+        "team": "red",
+        "box": [
+          1316,
+          448,
+          40,
+          175
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ],
+    "250": [
+      {
+        "person": "blue81",
+        "team": "blue",
+        "box": [
+          990,
+          315,
+          115,
+          195
+        ],
+        "main": false,
+        "hidden": false
+      },
+      {
+        "person": "blue_a",
+        "team": "blue",
+        "box": [
+          0,
+          355,
+          85,
+          120
+        ],
+        "main": false,
+        "hidden": false
+      }
+    ]
+  }
+}

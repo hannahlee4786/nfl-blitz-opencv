@@ -1,0 +1,4786 @@
+{
+  "video": "data/input/Clip 64.mov",
+  "crop_x0": 0,
+  "iou": 0.3,
+  "frames_scored": 32,
+  "gt": 300,
+  "visible": 299,
+  "hidden": 1,
+  "predicted": 332,
+  "hidden_matched": 0,
+  "countable_predictions": 332,
+  "matches": 181,
+  "misses": 118,
+  "false_boxes": 151,
+  "duplicates": 13,
+  "id_switches": 38,
+  "idtp": 106,
+  "idfp": 226,
+  "idfn": 193,
+  "idf1": 0.335975,
+  "coverage": 0.605351,
+  "precision": 0.545181,
+  "main_person": "blue90",
+  "main_persons": [
+    "blue90"
+  ],
+  "main_track_id": 9,
+  "main_frames": 32,
+  "main_correct": 6,
+  "main_accuracy": 0.1875,
+  "identity_map": {
+    "blue21": 6,
+    "blue22": 10,
+    "blue55": 5,
+    "blue78": 7,
+    "blue90": 9,
+    "blue95": 8,
+    "red12": 13,
+    "red28": 11,
+    "red40": 1,
+    "red61": 2,
+    "red70": 4,
+    "red74": 3,
+    "red87": 12
+  },
+  "switches": [
+    {
+      "person": "red74",
+      "from_frame": 40,
+      "to_frame": 50,
+      "from_id": 4,
+      "to_id": 2
+    },
+    {
+      "person": "red74",
+      "from_frame": 60,
+      "to_frame": 70,
+      "from_id": 2,
+      "to_id": 3
+    },
+    {
+      "person": "red74",
+      "from_frame": 130,
+      "to_frame": 360,
+      "from_id": 3,
+      "to_id": 4
+    },
+    {
+      "person": "red12",
+      "from_frame": 20,
+      "to_frame": 30,
+      "from_id": 3,
+      "to_id": 13
+    },
+    {
+      "person": "red12",
+      "from_frame": 120,
+      "to_frame": 160,
+      "from_id": 13,
+      "to_id": 4
+    },
+    {
+      "person": "red12",
+      "from_frame": 160,
+      "to_frame": 360,
+      "from_id": 4,
+      "to_id": 12
+    },
+    {
+      "person": "red61",
+      "from_frame": 40,
+      "to_frame": 50,
+      "from_id": 2,
+      "to_id": 3
+    },
+    {
+      "person": "red61",
+      "from_frame": 60,
+      "to_frame": 70,
+      "from_id": 3,
+      "to_id": 2
+    },
+    {
+      "person": "red61",
+      "from_frame": 110,
+      "to_frame": 130,
+      "from_id": 2,
+      "to_id": 13
+    },
+    {
+      "person": "red61",
+      "from_frame": 140,
+      "to_frame": 170,
+      "from_id": 13,
+      "to_id": 12
+    },
+    {
+      "person": "red61",
+      "from_frame": 190,
+      "to_frame": 200,
+      "from_id": 12,
+      "to_id": 4
+    },
+    {
+      "person": "red61",
+      "from_frame": 200,
+      "to_frame": 220,
+      "from_id": 4,
+      "to_id": 12
+    },
+    {
+      "person": "red61",
+      "from_frame": 220,
+      "to_frame": 240,
+      "from_id": 12,
+      "to_id": 3
+    },
+    {
+      "person": "red40",
+      "from_frame": 150,
+      "to_frame": 250,
+      "from_id": 1,
+      "to_id": 13
+    },
+    {
+      "person": "red40",
+      "from_frame": 250,
+      "to_frame": 260,
+      "from_id": 13,
+      "to_id": 4
+    },
+    {
+      "person": "red40",
+      "from_frame": 260,
+      "to_frame": 300,
+      "from_id": 4,
+      "to_id": 13
+    },
+    {
+      "person": "blue90",
+      "from_frame": 70,
+      "to_frame": 100,
+      "from_id": 9,
+      "to_id": 6
+    },
+    {
+      "person": "blue90",
+      "from_frame": 100,
+      "to_frame": 140,
+      "from_id": 6,
+      "to_id": 7
+    },
+    {
+      "person": "blue90",
+      "from_frame": 160,
+      "to_frame": 170,
+      "from_id": 7,
+      "to_id": 10
+    },
+    {
+      "person": "blue28",
+      "from_frame": 110,
+      "to_frame": 150,
+      "from_id": 8,
+      "to_id": 6
+    },
+    {
+      "person": "blue21",
+      "from_frame": 60,
+      "to_frame": 100,
+      "from_id": 6,
+      "to_id": 8
+    },
+    {
+      "person": "blue21",
+      "from_frame": 100,
+      "to_frame": 110,
+      "from_id": 8,
+      "to_id": 9
+    },
+    {
+      "person": "blue21",
+      "from_frame": 110,
+      "to_frame": 140,
+      "from_id": 9,
+      "to_id": 6
+    },
+    {
+      "person": "blue55",
+      "from_frame": 70,
+      "to_frame": 80,
+      "from_id": 5,
+      "to_id": 6
+    },
+    {
+      "person": "blue55",
+      "from_frame": 90,
+      "to_frame": 100,
+      "from_id": 6,
+      "to_id": 9
+    },
+    {
+      "person": "blue55",
+      "from_frame": 100,
+      "to_frame": 230,
+      "from_id": 9,
+      "to_id": 5
+    },
+    {
+      "person": "blue78",
+      "from_frame": 130,
+      "to_frame": 150,
+      "from_id": 7,
+      "to_id": 8
+    },
+    {
+      "person": "blue78",
+      "from_frame": 150,
+      "to_frame": 170,
+      "from_id": 8,
+      "to_id": 5
+    },
+    {
+      "person": "red28",
+      "from_frame": 50,
+      "to_frame": 70,
+      "from_id": 11,
+      "to_id": 1
+    },
+    {
+      "person": "red28",
+      "from_frame": 70,
+      "to_frame": 110,
+      "from_id": 1,
+      "to_id": 11
+    },
+    {
+      "person": "red28",
+      "from_frame": 260,
+      "to_frame": 320,
+      "from_id": 11,
+      "to_id": 3
+    },
+    {
+      "person": "red87",
+      "from_frame": 60,
+      "to_frame": 70,
+      "from_id": 12,
+      "to_id": 11
+    },
+    {
+      "person": "red87",
+      "from_frame": 70,
+      "to_frame": 90,
+      "from_id": 11,
+      "to_id": 12
+    },
+    {
+      "person": "red87",
+      "from_frame": 140,
+      "to_frame": 160,
+      "from_id": 12,
+      "to_id": 2
+    },
+    {
+      "person": "red87",
+      "from_frame": 300,
+      "to_frame": 360,
+      "from_id": 2,
+      "to_id": 1
+    },
+    {
+      "person": "red70",
+      "from_frame": 30,
+      "to_frame": 50,
+      "from_id": 2,
+      "to_id": 4
+    },
+    {
+      "person": "blue95",
+      "from_frame": 90,
+      "to_frame": 130,
+      "from_id": 8,
+      "to_id": 10
+    },
+    {
+      "person": "blue95",
+      "from_frame": 130,
+      "to_frame": 170,
+      "from_id": 10,
+      "to_id": 8
+    }
+  ],
+  "per_frame": [
+    {
+      "frame": 0,
+      "gt": 14,
+      "visible": 13,
+      "hidden": 1,
+      "predicted": 10,
+      "matches": 10,
+      "misses": 3,
+      "false_boxes": 0,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.769231,
+      "precision": 1.0,
+      "missed_persons": [
+        "red70",
+        "red87",
+        "blue95"
+      ],
+      "false_box_coords": []
+    },
+    {
+      "frame": 10,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 10,
+      "misses": 4,
+      "false_boxes": 1,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.714286,
+      "precision": 0.909091,
+      "missed_persons": [
+        "red70",
+        "red87",
+        "blue90",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            524.0,
+            163.0,
+            46.0,
+            97.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 12,
+      "misses": 2,
+      "false_boxes": 0,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.857143,
+      "precision": 1.0,
+      "missed_persons": [
+        "red70",
+        "blue95"
+      ],
+      "false_box_coords": []
+    },
+    {
+      "frame": 30,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 9,
+      "misses": 5,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.642857,
+      "precision": 0.692308,
+      "missed_persons": [
+        "red61",
+        "blue90",
+        "blue28",
+        "blue55",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            653.0,
+            482.0,
+            69.0,
+            58.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            957.0,
+            151.0,
+            28.0,
+            106.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            644.0,
+            128.0,
+            28.0,
+            76.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            510.0,
+            124.0,
+            41.0,
+            89.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 40,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 10,
+      "misses": 4,
+      "false_boxes": 3,
+      "hidden_matched": 0,
+      "duplicates": 2,
+      "switches": 0,
+      "coverage": 0.714286,
+      "precision": 0.769231,
+      "missed_persons": [
+        "red70",
+        "blue22",
+        "blue95",
+        "blue78"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            567.0,
+            290.0,
+            64.0,
+            167.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            574.0,
+            290.0,
+            30.0,
+            131.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            227.0,
+            148.0,
+            29.0,
+            58.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 50,
+      "gt": 13,
+      "visible": 13,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 11,
+      "misses": 2,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 3,
+      "coverage": 0.846154,
+      "precision": 0.846154,
+      "missed_persons": [
+        "blue21",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            887.0,
+            212.0,
+            50.0,
+            179.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            534.0,
+            228.0,
+            28.0,
+            162.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 60,
+      "gt": 13,
+      "visible": 13,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 9,
+      "misses": 4,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.692308,
+      "precision": 0.692308,
+      "missed_persons": [
+        "red12",
+        "red28",
+        "blue95",
+        "blue78"
+      ],
+      "false_box_coords": [
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            420.0,
+            338.0,
+            32.0,
+            40.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            197.0,
+            38.0,
+            25.0,
+            140.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            847.0,
+            165.0,
+            156.0,
+            220.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            679.0,
+            367.0,
+            74.0,
+            158.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 70,
+      "gt": 12,
+      "visible": 12,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 9,
+      "misses": 3,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 4,
+      "coverage": 0.75,
+      "precision": 0.818182,
+      "missed_persons": [
+        "red40",
+        "blue21",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            685.0,
+            205.0,
+            82.0,
+            378.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            840.0,
+            253.0,
+            58.0,
+            166.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 80,
+      "gt": 11,
+      "visible": 11,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 5,
+      "misses": 6,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.454545,
+      "precision": 0.416667,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "red87",
+        "blue90",
+        "blue28",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            582.0,
+            524.0,
+            30.0,
+            155.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            158.0,
+            437.0,
+            86.0,
+            142.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            268.0,
+            448.0,
+            33.0,
+            23.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            905.0,
+            247.0,
+            82.0,
+            143.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            510.0,
+            281.0,
+            63.0,
+            100.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            959.0,
+            299.0,
+            32.0,
+            70.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            844.0,
+            192.0,
+            40.0,
+            196.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 90,
+      "gt": 12,
+      "visible": 12,
+      "hidden": 0,
+      "predicted": 9,
+      "matches": 7,
+      "misses": 5,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.583333,
+      "precision": 0.777778,
+      "missed_persons": [
+        "red12",
+        "red28",
+        "blue90",
+        "blue28",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            543.0,
+            330.0,
+            46.0,
+            100.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            655.0,
+            367.0,
+            30.0,
+            117.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 100,
+      "gt": 10,
+      "visible": 10,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 6,
+      "misses": 4,
+      "false_boxes": 5,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 3,
+      "coverage": 0.6,
+      "precision": 0.545455,
+      "missed_persons": [
+        "red74",
+        "red12",
+        "red28",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            283.0,
+            446.0,
+            30.0,
+            143.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            188.0,
+            401.0,
+            28.0,
+            150.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            268.0,
+            417.0,
+            38.0,
+            45.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            782.0,
+            262.0,
+            67.0,
+            108.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            565.0,
+            280.0,
+            38.0,
+            107.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 110,
+      "gt": 11,
+      "visible": 11,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 8,
+      "misses": 3,
+      "false_boxes": 3,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.727273,
+      "precision": 0.727273,
+      "missed_persons": [
+        "blue95",
+        "blue90",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            245.0,
+            368.0,
+            48.0,
+            172.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            798.0,
+            208.0,
+            32.0,
+            139.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            559.0,
+            457.0,
+            34.0,
+            173.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 120,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.625,
+      "precision": 0.454545,
+      "missed_persons": [
+        "blue95",
+        "blue90",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            615.0,
+            177.0,
+            86.0,
+            159.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            283.0,
+            347.0,
+            76.0,
+            158.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            875.0,
+            74.0,
+            104.0,
+            197.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            585.0,
+            398.0,
+            82.0,
+            203.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            770.0,
+            203.0,
+            46.0,
+            100.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1103.0,
+            302.0,
+            24.0,
+            87.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 130,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 5,
+      "misses": 4,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.555556,
+      "precision": 0.416667,
+      "missed_persons": [
+        "red87",
+        "blue90",
+        "blue21",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            665.0,
+            234.0,
+            34.0,
+            170.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            335.0,
+            545.0,
+            28.0,
+            146.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            987.0,
+            87.0,
+            34.0,
+            142.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            556.0,
+            308.0,
+            88.0,
+            202.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            781.0,
+            122.0,
+            47.0,
+            98.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1101.0,
+            317.0,
+            24.0,
+            87.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            720.0,
+            134.0,
+            54.0,
+            130.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 140,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.625,
+      "precision": 0.454545,
+      "missed_persons": [
+        "blue78",
+        "blue95",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            556.0,
+            520.0,
+            28.0,
+            54.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            421.0,
+            379.0,
+            114.0,
+            174.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            687.0,
+            365.0,
+            40.0,
+            177.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            591.0,
+            304.0,
+            42.0,
+            197.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            762.0,
+            132.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            387.0,
+            159.0,
+            34.0,
+            49.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 150,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 4,
+      "misses": 5,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.444444,
+      "precision": 0.333333,
+      "missed_persons": [
+        "red61",
+        "blue95",
+        "blue55",
+        "red87",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            543.0,
+            286.0,
+            96.0,
+            220.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            539.0,
+            445.0,
+            32.0,
+            77.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            747.0,
+            533.0,
+            64.0,
+            101.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            787.0,
+            134.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            594.0,
+            248.0,
+            34.0,
+            45.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            966.0,
+            0.0,
+            154.0,
+            372.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            599.0,
+            230.0,
+            88.0,
+            112.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            547.0,
+            545.0,
+            42.0,
+            123.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 160,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 4,
+      "misses": 5,
+      "false_boxes": 9,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.444444,
+      "precision": 0.307692,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "blue95",
+        "blue78",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            497.0,
+            229.0,
+            62.0,
+            171.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            631.0,
+            401.0,
+            42.0,
+            159.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            682.0,
+            523.0,
+            78.0,
+            112.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            454.0,
+            269.0,
+            150.0,
+            211.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            805.0,
+            137.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            733.0,
+            236.0,
+            42.0,
+            102.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1057.0,
+            234.0,
+            64.0,
+            220.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            685.0,
+            400.0,
+            32.0,
+            170.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            557.0,
+            430.0,
+            28.0,
+            178.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 170,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 6,
+      "misses": 1,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 4,
+      "coverage": 0.857143,
+      "precision": 0.5,
+      "missed_persons": [
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            513.0,
+            291.0,
+            68.0,
+            45.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            603.0,
+            303.0,
+            28.0,
+            155.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            539.0,
+            368.0,
+            52.0,
+            209.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            729.0,
+            203.0,
+            46.0,
+            135.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            771.0,
+            137.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            536.0,
+            297.0,
+            34.0,
+            205.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 180,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 6,
+      "misses": 2,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.75,
+      "precision": 0.5,
+      "missed_persons": [
+        "red40",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            544.0,
+            283.0,
+            36.0,
+            51.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            618.0,
+            301.0,
+            34.0,
+            145.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            574.0,
+            399.0,
+            44.0,
+            116.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1066.0,
+            402.0,
+            51.0,
+            124.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            759.0,
+            139.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            531.0,
+            234.0,
+            52.0,
+            204.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 190,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.625,
+      "precision": 0.384615,
+      "missed_persons": [
+        "red40",
+        "blue55",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            543.0,
+            198.0,
+            64.0,
+            220.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            633.0,
+            308.0,
+            32.0,
+            102.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            570.0,
+            365.0,
+            58.0,
+            204.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1033.0,
+            454.0,
+            28.0,
+            69.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            721.0,
+            381.0,
+            28.0,
+            111.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            765.0,
+            139.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            788.0,
+            167.0,
+            52.0,
+            126.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            541.0,
+            241.0,
+            70.0,
+            100.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 200,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.625,
+      "precision": 0.384615,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            540.0,
+            185.0,
+            68.0,
+            220.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            624.0,
+            324.0,
+            36.0,
+            220.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1031.0,
+            440.0,
+            28.0,
+            82.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            486.0,
+            460.0,
+            93.0,
+            63.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            776.0,
+            140.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            979.0,
+            244.0,
+            102.0,
+            205.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            654.0,
+            379.0,
+            96.0,
+            174.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            546.0,
+            205.0,
+            48.0,
+            169.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 210,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 3,
+      "misses": 5,
+      "false_boxes": 10,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.375,
+      "precision": 0.230769,
+      "missed_persons": [
+        "red40",
+        "red61",
+        "red28",
+        "blue78",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            563.0,
+            237.0,
+            28.0,
+            179.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            689.0,
+            314.0,
+            32.0,
+            195.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            459.0,
+            445.0,
+            34.0,
+            133.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            547.0,
+            189.0,
+            88.0,
+            220.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            957.0,
+            248.0,
+            134.0,
+            364.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            453.0,
+            216.0,
+            98.0,
+            291.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            776.0,
+            140.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            955.0,
+            243.0,
+            140.0,
+            211.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            658.0,
+            408.0,
+            96.0,
+            174.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            527.0,
+            181.0,
+            52.0,
+            176.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 220,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 4,
+      "misses": 4,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.5,
+      "precision": 0.333333,
+      "missed_persons": [
+        "red40",
+        "blue78",
+        "blue55",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            553.0,
+            235.0,
+            32.0,
+            196.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            689.0,
+            294.0,
+            30.0,
+            146.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            486.0,
+            502.0,
+            32.0,
+            93.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            691.0,
+            233.0,
+            84.0,
+            210.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            989.0,
+            247.0,
+            110.0,
+            234.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            482.0,
+            182.0,
+            94.0,
+            316.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            921.0,
+            108.0,
+            36.0,
+            170.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            533.0,
+            98.0,
+            34.0,
+            220.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 230,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 10,
+      "matches": 3,
+      "misses": 5,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.375,
+      "precision": 0.3,
+      "missed_persons": [
+        "red40",
+        "red61",
+        "blue95",
+        "blue78",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            559.0,
+            266.0,
+            28.0,
+            171.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            723.0,
+            326.0,
+            38.0,
+            125.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            479.0,
+            294.0,
+            32.0,
+            93.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            509.0,
+            539.0,
+            148.0,
+            152.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            894.0,
+            49.0,
+            60.0,
+            177.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            697.0,
+            533.0,
+            138.0,
+            158.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            491.0,
+            146.0,
+            32.0,
+            56.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 240,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 9,
+      "matches": 5,
+      "misses": 2,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.714286,
+      "precision": 0.555556,
+      "missed_persons": [
+        "red40",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            572.0,
+            259.0,
+            92.0,
+            220.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            485.0,
+            311.0,
+            32.0,
+            63.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            569.0,
+            463.0,
+            112.0,
+            183.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            551.0,
+            293.0,
+            138.0,
+            182.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 250,
+      "gt": 5,
+      "visible": 5,
+      "hidden": 0,
+      "predicted": 6,
+      "matches": 2,
+      "misses": 3,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.4,
+      "precision": 0.333333,
+      "missed_persons": [
+        "blue90",
+        "red87",
+        "red61"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            707.0,
+            28.0,
+            32.0,
+            67.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            596.0,
+            423.0,
+            78.0,
+            116.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            775.0,
+            257.0,
+            48.0,
+            200.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            848.0,
+            29.0,
+            34.0,
+            59.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 260,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 7,
+      "matches": 3,
+      "misses": 3,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.5,
+      "precision": 0.428571,
+      "missed_persons": [
+        "blue90",
+        "red61",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            468.0,
+            132.0,
+            106.0,
+            243.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            605.0,
+            406.0,
+            70.0,
+            121.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            649.0,
+            126.0,
+            46.0,
+            205.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            443.0,
+            42.0,
+            68.0,
+            174.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 270,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 1,
+      "misses": 5,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.166667,
+      "precision": 0.2,
+      "missed_persons": [
+        "blue90",
+        "blue55",
+        "red40",
+        "red28",
+        "red61"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            604.0,
+            430.0,
+            58.0,
+            68.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            710.0,
+            164.0,
+            32.0,
+            111.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            467.0,
+            273.0,
+            110.0,
+            220.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            635.0,
+            374.0,
+            52.0,
+            109.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 300,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 4,
+      "matches": 2,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.333333,
+      "precision": 0.5,
+      "missed_persons": [
+        "blue90",
+        "red28",
+        "red61",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            861.0,
+            88.0,
+            52.0,
+            158.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 320,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 8,
+      "matches": 1,
+      "misses": 5,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.166667,
+      "precision": 0.125,
+      "missed_persons": [
+        "red87",
+        "blue90",
+        "red74",
+        "blue78",
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            338.0,
+            358.0,
+            32.0,
+            82.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            732.0,
+            260.0,
+            40.0,
+            220.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            480.0,
+            273.0,
+            108.0,
+            220.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            848.0,
+            73.0,
+            32.0,
+            167.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            619.0,
+            363.0,
+            40.0,
+            88.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            361.0,
+            189.0,
+            32.0,
+            59.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 360,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 3,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 3,
+      "coverage": 0.428571,
+      "precision": 0.6,
+      "missed_persons": [
+        "blue90",
+        "red40",
+        "blue95",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            738.0,
+            440.0,
+            52.0,
+            80.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 390,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 3,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.428571,
+      "precision": 0.6,
+      "missed_persons": [
+        "red87",
+        "blue95",
+        "blue90",
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            876.0,
+            338.0,
+            36.0,
+            95.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            874.0,
+            396.0,
+            37.0,
+            29.0
+          ]
+        }
+      ]
+    }
+  ],
+  "worst_frames": [
+    {
+      "frame": 210,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 3,
+      "misses": 5,
+      "false_boxes": 10,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.375,
+      "precision": 0.230769,
+      "missed_persons": [
+        "red40",
+        "red61",
+        "red28",
+        "blue78",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            563.0,
+            237.0,
+            28.0,
+            179.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            689.0,
+            314.0,
+            32.0,
+            195.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            459.0,
+            445.0,
+            34.0,
+            133.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            547.0,
+            189.0,
+            88.0,
+            220.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            957.0,
+            248.0,
+            134.0,
+            364.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            453.0,
+            216.0,
+            98.0,
+            291.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            776.0,
+            140.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            955.0,
+            243.0,
+            140.0,
+            211.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            658.0,
+            408.0,
+            96.0,
+            174.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            527.0,
+            181.0,
+            52.0,
+            176.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 160,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 4,
+      "misses": 5,
+      "false_boxes": 9,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.444444,
+      "precision": 0.307692,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "blue95",
+        "blue78",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            497.0,
+            229.0,
+            62.0,
+            171.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            631.0,
+            401.0,
+            42.0,
+            159.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            682.0,
+            523.0,
+            78.0,
+            112.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            454.0,
+            269.0,
+            150.0,
+            211.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            805.0,
+            137.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            733.0,
+            236.0,
+            42.0,
+            102.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1057.0,
+            234.0,
+            64.0,
+            220.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            685.0,
+            400.0,
+            32.0,
+            170.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            557.0,
+            430.0,
+            28.0,
+            178.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 80,
+      "gt": 11,
+      "visible": 11,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 5,
+      "misses": 6,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.454545,
+      "precision": 0.416667,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "red87",
+        "blue90",
+        "blue28",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            582.0,
+            524.0,
+            30.0,
+            155.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            158.0,
+            437.0,
+            86.0,
+            142.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            268.0,
+            448.0,
+            33.0,
+            23.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            905.0,
+            247.0,
+            82.0,
+            143.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            510.0,
+            281.0,
+            63.0,
+            100.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            959.0,
+            299.0,
+            32.0,
+            70.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            844.0,
+            192.0,
+            40.0,
+            196.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 150,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 4,
+      "misses": 5,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.444444,
+      "precision": 0.333333,
+      "missed_persons": [
+        "red61",
+        "blue95",
+        "blue55",
+        "red87",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            543.0,
+            286.0,
+            96.0,
+            220.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            539.0,
+            445.0,
+            32.0,
+            77.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            747.0,
+            533.0,
+            64.0,
+            101.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            787.0,
+            134.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            594.0,
+            248.0,
+            34.0,
+            45.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            966.0,
+            0.0,
+            154.0,
+            372.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            599.0,
+            230.0,
+            88.0,
+            112.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            547.0,
+            545.0,
+            42.0,
+            123.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 220,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 4,
+      "misses": 4,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.5,
+      "precision": 0.333333,
+      "missed_persons": [
+        "red40",
+        "blue78",
+        "blue55",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            553.0,
+            235.0,
+            32.0,
+            196.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            689.0,
+            294.0,
+            30.0,
+            146.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            486.0,
+            502.0,
+            32.0,
+            93.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            691.0,
+            233.0,
+            84.0,
+            210.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            989.0,
+            247.0,
+            110.0,
+            234.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            482.0,
+            182.0,
+            94.0,
+            316.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            921.0,
+            108.0,
+            36.0,
+            170.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            533.0,
+            98.0,
+            34.0,
+            220.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 230,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 10,
+      "matches": 3,
+      "misses": 5,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.375,
+      "precision": 0.3,
+      "missed_persons": [
+        "red40",
+        "red61",
+        "blue95",
+        "blue78",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            559.0,
+            266.0,
+            28.0,
+            171.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            723.0,
+            326.0,
+            38.0,
+            125.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            479.0,
+            294.0,
+            32.0,
+            93.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            509.0,
+            539.0,
+            148.0,
+            152.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            894.0,
+            49.0,
+            60.0,
+            177.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            697.0,
+            533.0,
+            138.0,
+            158.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            491.0,
+            146.0,
+            32.0,
+            56.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 320,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 8,
+      "matches": 1,
+      "misses": 5,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.166667,
+      "precision": 0.125,
+      "missed_persons": [
+        "red87",
+        "blue90",
+        "red74",
+        "blue78",
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            338.0,
+            358.0,
+            32.0,
+            82.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            732.0,
+            260.0,
+            40.0,
+            220.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            480.0,
+            273.0,
+            108.0,
+            220.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            848.0,
+            73.0,
+            32.0,
+            167.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            619.0,
+            363.0,
+            40.0,
+            88.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            361.0,
+            189.0,
+            32.0,
+            59.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 130,
+      "gt": 9,
+      "visible": 9,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 5,
+      "misses": 4,
+      "false_boxes": 7,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.555556,
+      "precision": 0.416667,
+      "missed_persons": [
+        "red87",
+        "blue90",
+        "blue21",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            665.0,
+            234.0,
+            34.0,
+            170.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            335.0,
+            545.0,
+            28.0,
+            146.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            987.0,
+            87.0,
+            34.0,
+            142.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            556.0,
+            308.0,
+            88.0,
+            202.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            781.0,
+            122.0,
+            47.0,
+            98.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1101.0,
+            317.0,
+            24.0,
+            87.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            720.0,
+            134.0,
+            54.0,
+            130.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 190,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.625,
+      "precision": 0.384615,
+      "missed_persons": [
+        "red40",
+        "blue55",
+        "blue90"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            543.0,
+            198.0,
+            64.0,
+            220.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            633.0,
+            308.0,
+            32.0,
+            102.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            570.0,
+            365.0,
+            58.0,
+            204.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1033.0,
+            454.0,
+            28.0,
+            69.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            721.0,
+            381.0,
+            28.0,
+            111.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            765.0,
+            139.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            788.0,
+            167.0,
+            52.0,
+            126.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            541.0,
+            241.0,
+            70.0,
+            100.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 200,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 8,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.625,
+      "precision": 0.384615,
+      "missed_persons": [
+        "red40",
+        "red28",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            540.0,
+            185.0,
+            68.0,
+            220.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            624.0,
+            324.0,
+            36.0,
+            220.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1031.0,
+            440.0,
+            28.0,
+            82.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            486.0,
+            460.0,
+            93.0,
+            63.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            776.0,
+            140.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            979.0,
+            244.0,
+            102.0,
+            205.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            654.0,
+            379.0,
+            96.0,
+            174.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            546.0,
+            205.0,
+            48.0,
+            169.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 30,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 9,
+      "misses": 5,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.642857,
+      "precision": 0.692308,
+      "missed_persons": [
+        "red61",
+        "blue90",
+        "blue28",
+        "blue55",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            653.0,
+            482.0,
+            69.0,
+            58.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            957.0,
+            151.0,
+            28.0,
+            106.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            644.0,
+            128.0,
+            28.0,
+            76.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            510.0,
+            124.0,
+            41.0,
+            89.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 100,
+      "gt": 10,
+      "visible": 10,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 6,
+      "misses": 4,
+      "false_boxes": 5,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 3,
+      "coverage": 0.6,
+      "precision": 0.545455,
+      "missed_persons": [
+        "red74",
+        "red12",
+        "red28",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            283.0,
+            446.0,
+            30.0,
+            143.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            188.0,
+            401.0,
+            28.0,
+            150.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            268.0,
+            417.0,
+            38.0,
+            45.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            782.0,
+            262.0,
+            67.0,
+            108.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            565.0,
+            280.0,
+            38.0,
+            107.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 120,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.625,
+      "precision": 0.454545,
+      "missed_persons": [
+        "blue95",
+        "blue90",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            615.0,
+            177.0,
+            86.0,
+            159.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            283.0,
+            347.0,
+            76.0,
+            158.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            875.0,
+            74.0,
+            104.0,
+            197.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            585.0,
+            398.0,
+            82.0,
+            203.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            770.0,
+            203.0,
+            46.0,
+            100.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            1103.0,
+            302.0,
+            24.0,
+            87.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 140,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 5,
+      "misses": 3,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.625,
+      "precision": 0.454545,
+      "missed_persons": [
+        "blue78",
+        "blue95",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            556.0,
+            520.0,
+            28.0,
+            54.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            421.0,
+            379.0,
+            114.0,
+            174.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            687.0,
+            365.0,
+            40.0,
+            177.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            591.0,
+            304.0,
+            42.0,
+            197.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            762.0,
+            132.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            387.0,
+            159.0,
+            34.0,
+            49.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 270,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 1,
+      "misses": 5,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.166667,
+      "precision": 0.2,
+      "missed_persons": [
+        "blue90",
+        "blue55",
+        "red40",
+        "red28",
+        "red61"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            604.0,
+            430.0,
+            58.0,
+            68.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            710.0,
+            164.0,
+            32.0,
+            111.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            467.0,
+            273.0,
+            110.0,
+            220.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            635.0,
+            374.0,
+            52.0,
+            109.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 60,
+      "gt": 13,
+      "visible": 13,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 9,
+      "misses": 4,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.692308,
+      "precision": 0.692308,
+      "missed_persons": [
+        "red12",
+        "red28",
+        "blue95",
+        "blue78"
+      ],
+      "false_box_coords": [
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            420.0,
+            338.0,
+            32.0,
+            40.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            197.0,
+            38.0,
+            25.0,
+            140.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            847.0,
+            165.0,
+            156.0,
+            220.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            679.0,
+            367.0,
+            74.0,
+            158.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 180,
+      "gt": 8,
+      "visible": 8,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 6,
+      "misses": 2,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.75,
+      "precision": 0.5,
+      "missed_persons": [
+        "red40",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            544.0,
+            283.0,
+            36.0,
+            51.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            618.0,
+            301.0,
+            34.0,
+            145.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            574.0,
+            399.0,
+            44.0,
+            116.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            1066.0,
+            402.0,
+            51.0,
+            124.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            759.0,
+            139.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            531.0,
+            234.0,
+            52.0,
+            204.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 40,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 10,
+      "misses": 4,
+      "false_boxes": 3,
+      "hidden_matched": 0,
+      "duplicates": 2,
+      "switches": 0,
+      "coverage": 0.714286,
+      "precision": 0.769231,
+      "missed_persons": [
+        "red70",
+        "blue22",
+        "blue95",
+        "blue78"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            567.0,
+            290.0,
+            64.0,
+            167.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            574.0,
+            290.0,
+            30.0,
+            131.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            227.0,
+            148.0,
+            29.0,
+            58.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 90,
+      "gt": 12,
+      "visible": 12,
+      "hidden": 0,
+      "predicted": 9,
+      "matches": 7,
+      "misses": 5,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.583333,
+      "precision": 0.777778,
+      "missed_persons": [
+        "red12",
+        "red28",
+        "blue90",
+        "blue28",
+        "blue21"
+      ],
+      "false_box_coords": [
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            543.0,
+            330.0,
+            46.0,
+            100.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            655.0,
+            367.0,
+            30.0,
+            117.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 170,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 6,
+      "misses": 1,
+      "false_boxes": 6,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 4,
+      "coverage": 0.857143,
+      "precision": 0.5,
+      "missed_persons": [
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            513.0,
+            291.0,
+            68.0,
+            45.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            603.0,
+            303.0,
+            28.0,
+            155.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            539.0,
+            368.0,
+            52.0,
+            209.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            729.0,
+            203.0,
+            46.0,
+            135.0
+          ]
+        },
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            771.0,
+            137.0,
+            66.0,
+            63.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            536.0,
+            297.0,
+            34.0,
+            205.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 250,
+      "gt": 5,
+      "visible": 5,
+      "hidden": 0,
+      "predicted": 6,
+      "matches": 2,
+      "misses": 3,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.4,
+      "precision": 0.333333,
+      "missed_persons": [
+        "blue90",
+        "red87",
+        "red61"
+      ],
+      "false_box_coords": [
+        {
+          "id": 2,
+          "team": "red",
+          "box": [
+            707.0,
+            28.0,
+            32.0,
+            67.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            596.0,
+            423.0,
+            78.0,
+            116.0
+          ]
+        },
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            775.0,
+            257.0,
+            48.0,
+            200.0
+          ]
+        },
+        {
+          "id": 10,
+          "team": "blue",
+          "box": [
+            848.0,
+            29.0,
+            34.0,
+            59.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 260,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 7,
+      "matches": 3,
+      "misses": 3,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.5,
+      "precision": 0.428571,
+      "missed_persons": [
+        "blue90",
+        "red61",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            468.0,
+            132.0,
+            106.0,
+            243.0
+          ]
+        },
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            605.0,
+            406.0,
+            70.0,
+            121.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            649.0,
+            126.0,
+            46.0,
+            205.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            443.0,
+            42.0,
+            68.0,
+            174.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 110,
+      "gt": 11,
+      "visible": 11,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 8,
+      "misses": 3,
+      "false_boxes": 3,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 2,
+      "coverage": 0.727273,
+      "precision": 0.727273,
+      "missed_persons": [
+        "blue95",
+        "blue90",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            245.0,
+            368.0,
+            48.0,
+            172.0
+          ]
+        },
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            798.0,
+            208.0,
+            32.0,
+            139.0
+          ]
+        },
+        {
+          "id": 13,
+          "team": "red",
+          "box": [
+            559.0,
+            457.0,
+            34.0,
+            173.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 240,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 9,
+      "matches": 5,
+      "misses": 2,
+      "false_boxes": 4,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 1,
+      "coverage": 0.714286,
+      "precision": 0.555556,
+      "missed_persons": [
+        "red40",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 1,
+          "team": "red",
+          "box": [
+            572.0,
+            259.0,
+            92.0,
+            220.0
+          ]
+        },
+        {
+          "id": 4,
+          "team": "red",
+          "box": [
+            485.0,
+            311.0,
+            32.0,
+            63.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            569.0,
+            463.0,
+            112.0,
+            183.0
+          ]
+        },
+        {
+          "id": 8,
+          "team": "blue",
+          "box": [
+            551.0,
+            293.0,
+            138.0,
+            182.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 300,
+      "gt": 6,
+      "visible": 6,
+      "hidden": 0,
+      "predicted": 4,
+      "matches": 2,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 1,
+      "coverage": 0.333333,
+      "precision": 0.5,
+      "missed_persons": [
+        "blue90",
+        "red28",
+        "red61",
+        "red12"
+      ],
+      "false_box_coords": [
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            861.0,
+            88.0,
+            52.0,
+            158.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 360,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 3,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 3,
+      "coverage": 0.428571,
+      "precision": 0.6,
+      "missed_persons": [
+        "blue90",
+        "red40",
+        "blue95",
+        "blue55"
+      ],
+      "false_box_coords": [
+        {
+          "id": 5,
+          "team": "blue",
+          "box": [
+            738.0,
+            440.0,
+            52.0,
+            80.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            639.0,
+            257.0,
+            84.0,
+            220.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 390,
+      "gt": 7,
+      "visible": 7,
+      "hidden": 0,
+      "predicted": 5,
+      "matches": 3,
+      "misses": 4,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.428571,
+      "precision": 0.6,
+      "missed_persons": [
+        "red87",
+        "blue95",
+        "blue90",
+        "red40"
+      ],
+      "false_box_coords": [
+        {
+          "id": 3,
+          "team": "red",
+          "box": [
+            876.0,
+            338.0,
+            36.0,
+            95.0
+          ]
+        },
+        {
+          "id": 11,
+          "team": "red",
+          "box": [
+            874.0,
+            396.0,
+            37.0,
+            29.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 10,
+      "misses": 4,
+      "false_boxes": 1,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.714286,
+      "precision": 0.909091,
+      "missed_persons": [
+        "red70",
+        "red87",
+        "blue90",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 9,
+          "team": "blue",
+          "box": [
+            524.0,
+            163.0,
+            46.0,
+            97.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 70,
+      "gt": 12,
+      "visible": 12,
+      "hidden": 0,
+      "predicted": 11,
+      "matches": 9,
+      "misses": 3,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 4,
+      "coverage": 0.75,
+      "precision": 0.818182,
+      "missed_persons": [
+        "red40",
+        "blue21",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            685.0,
+            205.0,
+            82.0,
+            378.0
+          ]
+        },
+        {
+          "id": 12,
+          "team": "red",
+          "box": [
+            840.0,
+            253.0,
+            58.0,
+            166.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 50,
+      "gt": 13,
+      "visible": 13,
+      "hidden": 0,
+      "predicted": 13,
+      "matches": 11,
+      "misses": 2,
+      "false_boxes": 2,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 3,
+      "coverage": 0.846154,
+      "precision": 0.846154,
+      "missed_persons": [
+        "blue21",
+        "blue95"
+      ],
+      "false_box_coords": [
+        {
+          "id": 6,
+          "team": "blue",
+          "box": [
+            887.0,
+            212.0,
+            50.0,
+            179.0
+          ]
+        },
+        {
+          "id": 7,
+          "team": "blue",
+          "box": [
+            534.0,
+            228.0,
+            28.0,
+            162.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 0,
+      "gt": 14,
+      "visible": 13,
+      "hidden": 1,
+      "predicted": 10,
+      "matches": 10,
+      "misses": 3,
+      "false_boxes": 0,
+      "hidden_matched": 0,
+      "duplicates": 0,
+      "switches": 0,
+      "coverage": 0.769231,
+      "precision": 1.0,
+      "missed_persons": [
+        "red70",
+        "red87",
+        "blue95"
+      ],
+      "false_box_coords": []
+    },
+    {
+      "frame": 20,
+      "gt": 14,
+      "visible": 14,
+      "hidden": 0,
+      "predicted": 12,
+      "matches": 12,
+      "misses": 2,
+      "false_boxes": 0,
+      "hidden_matched": 0,
+      "duplicates": 1,
+      "switches": 0,
+      "coverage": 0.857143,
+      "precision": 1.0,
+      "missed_persons": [
+        "red70",
+        "blue95"
+      ],
+      "false_box_coords": []
+    }
+  ]
+}
