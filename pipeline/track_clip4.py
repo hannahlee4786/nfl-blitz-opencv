@@ -5719,9 +5719,10 @@ def _sideline_cone_ids(samples, frame_hw):
     """Ids whose whole life is a stationary orange cone on the boundary.
 
     A player standing still before the snap is tall. A cone is a short
-    orange box, and its foot stays put in field yards. The far sideline is
-    y=0 and the near sideline is y=53.33; a fit that never reaches the near
-    line still puts the cone past every player-sized track. Only the
+    orange box, and its foot stays put on the ground plane: the per-frame
+    homographies map that foot to one place in field yards. Player-sized
+    tracks set the sideline test, so a cone is the small warm track sitting
+    past that group. A painted yard number is not required. Only the
     player-boxes path calls this.
     """
     if not samples or frame_hw is None:
@@ -5827,12 +5828,23 @@ def render_external_boxes(n, A, status):
                 int(round(float(bw))),
                 int(round(float(bh))),
             )
-            body = _external_body(bbox, A[i])
+            # The published foot still uses _external_body, which drops a
+            # point past y=50. A cone on a fresh fit lands in that region,
+            # so the cone test keeps the raw ground-plane foot.
+            foot_box = (
+                float(x) - crop_x0,
+                float(y),
+                float(bw),
+                float(bh),
+            )
+            raw = _project_point(*_foot_of(foot_box), A[i])
+            if raw is not None and not np.isfinite(raw).all():
+                raw = None
             cone_samples.setdefault(int(float(tid)), []).append({
                 "frame": i,
                 "bw": float(bw),
                 "bh": float(bh),
-                "world": None if body is None else body["world"],
+                "world": None if raw is None else (float(raw[0]), float(raw[1])),
                 "warm": _warm_orange_fraction(frame, bbox),
             })
     cones = _sideline_cone_ids(cone_samples, frame_hw)
