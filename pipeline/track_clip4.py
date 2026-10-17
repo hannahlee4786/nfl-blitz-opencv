@@ -17,6 +17,7 @@ Clip 4 specifics:
     effects, football) that appear late in the clip.
 """
 import csv
+import json
 import os
 import sys
 import cv2
@@ -30,8 +31,9 @@ import field_homography as fh
 from track_clip import (fit_frame, inter_frame_h,
                         TEAM_BGR, STATUS_BGR, LEFT_SCALE, to_map)
 from project_players import detect_players
-from src.team_classifier import (classify_jersey_region, crop_region,
-                                 load_calibration_report)
+from src.team_classifier import (ColorPrototype, build_color_prototype,
+                                 classify_jersey_region, crop_region,
+                                 load_calibration_report, prototype_distance)
 
 CLIP = "Clip_4 Camera Swing and Distance Change Test.mp4"
 REF_FRAME = 0
@@ -40,13 +42,28 @@ REF_ANCHOR = -15.0         # fresh x - 15 = absolute yards (verified vs the
 PXY = fh.PXY
 OUT_VIDEO = "data/output/tracked_players.mp4"
 OUT_CSV = "data/output/positions.csv"
+OUT_BOXES = "data/output/boxes.csv"
 SAMPLE_AT = {0, 30, 60, 120, 180, 240}
 SAMPLE_DIR = "data/output/frames"
 HOMOGRAPHY_CACHE = "data/output/homography.npz"
 FIELD_MAP = ""
 TEAM_PROTOTYPES = None
+# External boxes CSV. None keeps the built-in detector and tracker.
+PLAYER_BOXES = None
 # (x0, x1) of the picture inside black side bars. None until the first frame.
 _CONTENT_X = None
+WRITE_VIDEO = True
+STOP_AT = None
+# Published-box relink. False leaves the ids track_bidirectional wrote.
+RELINK = True
+# 4b. False only builds the cuts and does not rename.
+RELINK_LINKS = True
+# Screen-fixed captions (banner, scoreboard text, WIN letters). Field
+# paint is not in the mask. False leaves every box the tracker wrote.
+OVERLAY_MASK = True
+_OVERLAY_FRAMES = None
+# Two ids on one body, removed after tracking. False writes every box.
+SAME_BODY = True
 
 
 def _content_x(frame):
@@ -77,6 +94,98 @@ def _take(cap):
     if x0 != 0 or x1 != frame.shape[1]:
         frame = frame[:, x0:x1]
     return True, frame
+
+
+# Dropped when the frame index changes. A capture can reuse one ndarray
+# for the next frame, so identity alone would keep the previous picture.
+_MEMO_AT = None
+_MEMO = {}
+_MISSING = object()
+_FRAME_BUDGET = 1500 * 1024 * 1024
+
+
+def _memo_reset():
+    global _MEMO_AT, _MEMO
+    _MEMO_AT = None
+    _MEMO = {}
+
+
+def _memo_begin(index):
+    global _MEMO_AT, _MEMO
+    if index != _MEMO_AT:
+        _MEMO_AT = index
+        _MEMO = {}
+
+
+def _memo_get(key, objs):
+    # The dict key is an address. The arrays are kept so that address
+    # cannot be reused for a different array during this frame.
+    if _MEMO_AT is None:
+        return _MISSING
+    hit = _MEMO.get(key)
+    if hit is None:
+        return _MISSING
+    stored, value = hit
+    if len(stored) != len(objs):
+        return _MISSING
+    for have, want in zip(stored, objs):
+        if have is not want:
+            return _MISSING
+    return value
+
+
+def _memo_put(key, objs, value):
+    if _MEMO_AT is not None:
+        _MEMO[key] = (tuple(objs), value)
+
+
+def _hsv_of(frame):
+    key = ("hsv", id(frame))
+    objs = (frame,)
+    hit = _memo_get(key, objs)
+    if hit is not _MISSING:
+        return hit
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    _memo_put(key, objs, hsv)
+    return hsv
+
+
+def _load_frames(n):
+    """Frames the detect, track, and render passes would each decode.
+
+    Stored only when the cropped clip is under 1.5 GB. The copy is the
+    picture _take returns, so a later read cannot overwrite it.
+    """
+    cap = cv2.VideoCapture(CLIP)
+    frames = []
+    while len(frames) < n:
+        ok, frame = _take(cap)
+        if not ok:
+            break
+        if not frames and frame.nbytes * n > _FRAME_BUDGET:
+            cap.release()
+            return None
+        frames.append(frame.copy())
+    cap.release()
+    return frames
+
+
+def _iter_frames(n, frames):
+    if frames is not None:
+        for i, frame in enumerate(frames):
+            if i >= n:
+                break
+            yield i, frame
+        return
+    cap = cv2.VideoCapture(CLIP)
+    i = 0
+    while i < n:
+        ok, frame = _take(cap)
+        if not ok:
+            break
+        yield i, frame
+        i += 1
+    cap.release()
 
 
 # ---------------------------------------------------------------- optical flow
@@ -254,10 +363,17 @@ def _color_frac(hsv, bbox, team):
 
 
 def _team_masks(hsv):
+    key = ("teams", id(hsv))
+    objs = (hsv,)
+    hit = _memo_get(key, objs)
+    if hit is not _MISSING:
+        return hit
     hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     red = ((hch < 12) | (hch > 168)) & (sch > 75) & (vch > 50)
     blue = (hch > 100) & (hch < 135) & (sch > 75) & (vch > 55)
-    return red, blue
+    out = (red, blue)
+    _memo_put(key, objs, out)
+    return out
 
 
 def _mask_components(mask):
@@ -297,6 +413,59 @@ def _split_wide(mask, bbox):
     if valley < 18 or bw - valley < 18:
         return [bbox]
     return [(x, y, valley, bh), (x + valley, y, bw - valley, bh)]
+
+
+def _jersey_numbers(hsv, mask, bbox):
+    """Centers of the numbers printed on this team's jerseys inside bbox.
+
+    A number is a light hole in the jersey color. Closing the mask fills
+    it, so the pixels that closing adds and that are light and not grass
+    are the digits. Hands, gaps, and stripes are much smaller than a pair
+    of digits.
+    """
+    height, width = hsv.shape[:2]
+    x, y, bw, bh = [int(v) for v in bbox]
+    x0, y0 = max(0, x - 4), max(0, y - 4)
+    x1, y1 = min(width, x + bw + 4), min(height, y + bh + 4)
+    if x1 - x0 < 12 or y1 - y0 < 12:
+        return []
+    jer = mask[y0:y1, x0:x1].astype(np.uint8) * 255
+    filled = cv2.morphologyEx(jer, cv2.MORPH_CLOSE, np.ones((11, 11), np.uint8)) > 0
+    patch = hsv[y0:y1, x0:x1]
+    hh, ss, vv = patch[..., 0], patch[..., 1], patch[..., 2]
+    grass = (hh > 60) & (hh < 110) & (ss > 60)
+    holes = filled & (jer == 0) & (ss < 115) & (vv > 125) & ~grass
+    joined = cv2.dilate(holes.astype(np.uint8) * 255, np.ones((3, 5), np.uint8))
+    count, _, stats, cent = cv2.connectedComponentsWithStats(joined)
+    found = []
+    for i in range(1, count):
+        cw, ch, area = int(stats[i][2]), int(stats[i][3]), int(stats[i][4])
+        if area < 150 or cw < 14 or ch < 10 or cw > 44 or ch > 34:
+            continue
+        found.append((x0 + float(cent[i][0]), y0 + float(cent[i][1])))
+    return found
+
+
+def _split_by_numbers(hsv, mask, bbox):
+    """Two teammates side by side are one blob with two numbers on it.
+    Cut the blob halfway between the numbers."""
+    x, y, bw, bh = bbox
+    nums = sorted(_jersey_numbers(hsv, mask, bbox))
+    if len(nums) < 2:
+        return [bbox]
+    cuts = []
+    for (ax, _), (bx, _) in zip(nums, nums[1:]):
+        if bx - ax >= 18:
+            cuts.append(int(round((ax + bx) / 2.0)))
+    if not cuts:
+        return [bbox]
+    parts = []
+    left = x
+    for cut in cuts + [x + bw]:
+        if cut - left >= 16:
+            parts.append((left, y, cut - left, bh))
+        left = cut
+    return parts if len(parts) >= 2 else [bbox]
 
 
 def _iou_over_smaller(a, b):
@@ -730,9 +899,27 @@ def _grow_edge(hsv, mask, x, y, w, h, shape):
 
 def _jersey_bodies(mask, shape, hsv=None):
     """Player-shaped jerseys on this frame, with a box down to the feet."""
+    objs = (mask, hsv)
+    key = ("bodies", id(mask), shape[:2],
+           None if hsv is None else id(hsv), _LOOSE_LINE)
+    hit = _memo_get(key, objs)
+    if hit is not _MISSING:
+        return hit
     height, width = shape[:2]
     bodies = []
-    for comp in _merge_vertical(_mask_components(mask), hsv=hsv):
+    comps = _merge_vertical(_mask_components(mask), hsv=hsv)
+    if _LOOSE_LINE and hsv is not None:
+        split = []
+        for comp in comps:
+            parts = _split_by_numbers(hsv, mask, comp["bbox"])
+            if len(parts) == 1:
+                split.append(comp)
+                continue
+            for px, py, pw, ph in parts:
+                area = int(mask[py:py + ph, px:px + pw].sum())
+                split.append(dict(bbox=(px, py, pw, ph), area=area, numbered=True))
+        comps = split
+    for comp in comps:
         x, y, bw, bh = comp["bbox"]
         if comp["area"] < 240 or bh < 18 or bw < 16 or bw > 150:
             continue
@@ -763,8 +950,9 @@ def _jersey_bodies(mask, shape, hsv=None):
             continue
         if y < height * 0.16 and x < width * 0.18:
             continue
-        # The KAG logo sits in the bottom-right corner. Players do not.
-        if x + bw / 2.0 > width * 0.75 and y > height * 0.68:
+        # The KAG logo and the bottom banner sit in the corner.
+        # A player on the sideline is above that corner.
+        if y > height * 0.82 and x + bw / 2.0 > width * 0.82:
             continue
         if bw > bh * 2.2 and bh < 48:
             continue
@@ -775,13 +963,14 @@ def _jersey_bodies(mask, shape, hsv=None):
         if hsv is not None and bh >= 24:
             sub = mask[y:y + bh, x:x + bw]
             widths = sub.sum(axis=1).astype(np.float32)
+            corr = 0.0
             if widths.size >= 8 and float(widths.std()) > 1.0:
                 corr = float(np.corrcoef(np.arange(widths.size), widths)[0, 1])
                 patch = hsv[y:y + bh, x:x + bw]
                 white = float(((patch[..., 1] < 70) & (patch[..., 2] > 150)).mean())
                 # The red 20 marker is a triangle that widens downward
                 # around a white digit. Jerseys do not do both.
-                if corr > 0.72 and white > 0.07:
+                if corr > 0.65 and white > 0.07 and bw < 55:
                     continue
             if y + bh < height * 0.84:
                 y1 = min(height - 1, y + bh + int(max(16, bh * 0.8)))
@@ -789,7 +978,12 @@ def _jersey_bodies(mask, shape, hsv=None):
                     sch, vch = hsv[..., 1], hsv[..., 2]
                     leg = float(((sch[y + bh:y1, x:x + bw] < 105)
                                  & (vch[y + bh:y1, x:x + bw] > 48)).mean())
-                    if leg < 0.15:
+                    # He is on the white sideline, so the pants test sees
+                    # the line instead of his legs. The jersey is still his.
+                    edge = x + bw > width * 0.90
+                    on_sideline = (
+                        edge and comp["area"] >= 1800 and bh >= 70 and corr < 0.45)
+                    if leg < 0.15 and not on_sideline:
                         continue
         if hsv is not None:
             sub = mask[y:y + bh, x:x + bw]
@@ -839,11 +1033,14 @@ def _jersey_bodies(mask, shape, hsv=None):
         if nw < 24 or nh < 30:
             continue
         # The BLITZ letters and the NFL shield are flat blue paint. A box
-        # on them has that paint and no jersey.
+        # on them has that paint and no jersey. The end-zone name is a
+        # darker blue, and a wide short box on it is the same kind of paint.
         if hsv is not None and (_on_field_logo(hsv, (nx, ny, nw, nh))
-                                or _on_endzone_letters(hsv, (nx, ny, nw, nh))):
+                                or _on_endzone_letters(hsv, (nx, ny, nw, nh))
+                                or _flat_on_paint(hsv, (nx, ny, nw, nh))):
             continue
         bodies.append((nx, ny, nw, nh, cx, float(ny + nh)))
+    _memo_put(key, objs, bodies)
     return bodies
 
 
@@ -859,7 +1056,7 @@ def _row_mid(arr):
 
 def _on_grass(frame):
     """A gameplay picture is mostly green. The closing logo card is not."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = _hsv_of(frame)
     hh, ss, vv = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     grass = (hh > 65) & (hh < 110) & (ss > 55) & (vv > 40)
     return float(grass.mean()) >= 0.30
@@ -1035,6 +1232,67 @@ def _on_endzone_letters(hsv, box):
     return (right - left) > 280
 
 
+def _endzone_span(hsv, box):
+    """How wide the saturated end-zone name is through this box.
+
+    Those letters are the same blue as a jersey, so the pale-logo test
+    misses them. A bright flare in the middle of a letter is still the
+    name. The gaps between letters are short, and a jersey is one blob.
+    """
+    height, width = hsv.shape[:2]
+    x, y, w, h = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    x0, x1 = max(0, x), min(width, x + max(w, 1))
+    y0, y1 = max(0, y), min(height, y + max(h, 1))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return 0
+    best = 0
+    for row in range(y0, y1, 2):
+        hue, sat, val = hsv[row, :, 0], hsv[row, :, 1], hsv[row, :, 2]
+        paint = ((hue > 105) & (hue < 132) & (val > 90)
+                 & ((sat > 70) | (val > 170)))
+        idx = np.where(paint)[0]
+        if idx.size < 10:
+            continue
+        splits = np.where(np.diff(idx) > 42)[0]
+        starts = np.r_[0, splits + 1]
+        ends = np.r_[splits, idx.size - 1]
+        for a, b in zip(starts, ends):
+            left, right = int(idx[a]), int(idx[b])
+            if min(right, x1) - max(left, x0) < 10:
+                continue
+            best = max(best, right - left)
+    return best
+
+
+def _flat_on_paint(hsv, box):
+    """A wide, short box sitting on field paint.
+
+    A tall box that still holds a jersey only overlaps the paint, so
+    the name underneath it does not count. The painted name is wider
+    than a player.
+    """
+    height, width = hsv.shape[:2]
+    x, y, w, h = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    if h < 16 or w < 28 or h > 52 or w < int(h * 1.25):
+        return False
+    if _on_field_logo(hsv, box) or _on_endzone_letters(hsv, box):
+        return True
+    x0, x1 = max(0, x), min(width, x + max(w, 1))
+    y0, y1 = max(0, y), min(height, y + max(h, 1))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return False
+    patch = hsv[y0:y1, x0:x1]
+    hh, ss, vv = patch[..., 0], patch[..., 1], patch[..., 2]
+    grass = (hh > 65) & (hh < 110) & (ss > 55) & (vv > 40)
+    if float(grass.mean()) > 0.72:
+        return False
+    blue = (hh > 105) & (hh < 132) & (ss > 70) & (vv > 90)
+    flare = (hh > 100) & (hh < 135) & (ss < 100) & (vv > 170)
+    if float((blue | flare).mean()) < 0.34:
+        return False
+    return _endzone_span(hsv, box) >= 240
+
+
 def _on_white_sideline(hsv, box):
     """A tall box on the painted sideline, not a white jersey.
 
@@ -1151,13 +1409,17 @@ def _person_span(hsv, x, y, bw, bh, shape):
     x0, x1 = max(0, int(x)), min(width, int(x + bw))
     if x1 - x0 < 6:
         return y, y + bh
-    hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    # Same tests as a full-frame mask, on the rows this walk actually reads.
+    y_lo = max(0, int(y) - 56)
+    y_hi = min(height, int(y + bh) + 72)
+    patch = hsv[y_lo:y_hi, x0:x1]
+    hch, sch, vch = patch[..., 0], patch[..., 1], patch[..., 2]
     field = (hch > 65) & (hch < 110) & (sch > 55) & (vch > 40)
     person = ~field & (vch > 42)
     top = y
     gap = 0
     for row in range(int(y) - 1, max(0, int(y) - 56), -1):
-        if float(person[row, x0:x1].mean()) > 0.22:
+        if float(person[row - y_lo].mean()) > 0.22:
             top = row
             gap = 0
         else:
@@ -1167,9 +1429,9 @@ def _person_span(hsv, x, y, bw, bh, shape):
     bot = y + bh
     gap = 0
     for row in range(int(y + bh), min(height - 1, int(y + bh) + 72)):
-        if float(np.median(vch[row, x0:x1])) < 42:
+        if float(np.median(vch[row - y_lo])) < 42:
             break
-        if float(person[row, x0:x1].mean()) > 0.18:
+        if float(person[row - y_lo].mean()) > 0.18:
             bot = row
             gap = 0
         else:
@@ -1276,7 +1538,7 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
     """One box per body. The blue ring and the '1' marker are labels,
     not players. A jersey seed grows by a fixed fraction of its own height
     so the box covers helmet and legs."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = _hsv_of(frame)
     hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     height, width = frame.shape[:2]
     ring = _find_ring(hsv, hint, prev_r)
@@ -1302,9 +1564,19 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
         hard = mask.astype(np.uint8) * 255
         seeds = []
         for comp in _merge_fragments(_mask_components(mask)):
-            seeds.extend(_split_wide(hard, comp["bbox"]))
+            for part in _split_wide(hard, comp["bbox"]):
+                # Clip 4 never sets the loose-line flag, so its seeds stay.
+                if _LOOSE_LINE:
+                    seeds.extend(_split_by_numbers(hsv, mask, part))
+                else:
+                    seeds.append(part)
         for x, y, bw, bh in seeds:
-            if bw * bh < 700 or bh < 22 or bw > 170 or bw < 16:
+            # A player in the back of the picture is a short jersey. The
+            # usual 22-pixel seed drops him, then he never gets a number.
+            far_seed = y < height * 0.42 and bh >= 16 and bw * bh >= 360
+            if bw > 170 or bw < 16 or bh < 16:
+                continue
+            if not far_seed and (bw * bh < 700 or bh < 22):
                 continue
             if y > height * 0.84:
                 continue
@@ -1323,7 +1595,11 @@ def _propose_bodies(frame, hint=None, prev_r=None, leg_min=0.32):
             x1 = int(min(width - 1, cx + half))
             y0 = int(max(0, y - up))
             yb = int(min(height * 0.90, y + bh + down))
-            if x1 - x0 < 34 or yb - y0 < 36:
+            # A player running away gets a narrow jersey. The usual
+            # 34-pixel box drops the far-right blue once he is small.
+            # Clip 4 never sets the loose-line flag, so its cutoff stays.
+            min_w = 24 if (_LOOSE_LINE and y < height * 0.42) else 34
+            if x1 - x0 < min_w or yb - y0 < 36:
                 continue
             if (x0 + x1) / 2 > 0.80 * width and (y0 + yb) / 2 > 0.75 * height:
                 continue
@@ -1496,6 +1772,38 @@ def _accepted_body(det, A):
                 main=bool(det["main"]))
 
 
+def _external_body(bbox, A):
+    """A learned box whose foot projects onto the field.
+
+    The -10 yard lower bound and the 0.25 yard minimum in _accepted_body
+    match classical boxes. Learned feet on the quarterback land just past
+    y=-10, at the point the classical track already publishes, and distant
+    players are narrower than 0.25 yards. Width uses the centre 40% of the
+    bottom edge so a wide torso still has a foot under the 6.5 yard cap.
+    The upper y bound of 50 stays, which stops a bad foot from walking
+    off the field under _clamp_step.
+    """
+    world = _project_point(*_foot_of(bbox), A)
+    if world is None or not np.isfinite(world).all():
+        return None
+    xw, yw = float(world[0]), float(world[1])
+    if yw > 50:
+        return None
+    x0, y0, bw, bh = bbox
+    inset = 0.30
+    corners = np.array(
+        [[[x0 + bw * inset, y0 + bh]], [[x0 + bw * (1.0 - inset), y0 + bh]]],
+        np.float32,
+    )
+    wc = cv2.perspectiveTransform(corners, A.astype(np.float32))[:, 0, :]
+    if not np.isfinite(wc).all():
+        return None
+    width_yd = float(np.linalg.norm(wc[1] - wc[0]))
+    if width_yd > 6.5:
+        return None
+    return {"world": (xw, yw), "width_yd": width_yd}
+
+
 def _on_this_field(items):
     """Keep feet on the Clip 4 field, and also the cluster standing at the
     line when a different camera puts that line outside those yards."""
@@ -1529,11 +1837,13 @@ def _claim_arrow_body(frame, hsv, items, ring):
             best, best_d = det, dx
     if best is None:
         return
-    x, y, bw, bh = best["bbox"]
-    ny = int(max(y, ay - abh * 0.55))
-    nh = (y + bh) - ny
-    if nh >= 36:
-        best["bbox"] = (x, ny, bw, int(nh))
+    trimmed = _trim_marker_box(hsv, best["bbox"])
+    if trimmed != tuple(int(round(v)) for v in best["bbox"]):
+        best["bbox"] = trimmed
+        best["feet"] = _foot_of(trimmed)
+        # The snap order uses the feet from before this cut. The roster
+        # moves the world onto the new feet after the ids are assigned.
+        best["marker_trim"] = True
     best["main"] = True
 
 
@@ -1547,8 +1857,10 @@ def _bodies_of(frame, A, hint, prev_r, leg_min):
     bodies, ring = _propose_bodies(frame, hint, prev_r, leg_min=leg_min)
     items = [d for d in (_accepted_body(b, A) for b in bodies) if d is not None]
     items = _on_this_field(items)
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    items = [d for d in items if not _on_field_logo(hsv, d["bbox"])]
+    hsv = _hsv_of(frame)
+    items = [d for d in items
+             if not _on_field_logo(hsv, d["bbox"])
+             and not _flat_on_paint(hsv, d["bbox"])]
     return items, ring, hsv
 
 
@@ -1710,10 +2022,168 @@ def _far_players(hsv):
     return kept
 
 
+def _glyph_lines(glyphs):
+    """Runs of similar glyphs on one horizontal line.
+
+    A jersey is one blob. A caption is several blobs of one height
+    spread across the screen.
+    """
+    glyphs = sorted(glyphs, key=lambda g: g[1] + g[3] / 2.0)
+    used = [False] * len(glyphs)
+    lines = []
+    for i, glyph in enumerate(glyphs):
+        if used[i]:
+            continue
+        cy = glyph[1] + glyph[3] / 2.0
+        group = [i]
+        used[i] = True
+        for j, other in enumerate(glyphs):
+            if used[j]:
+                continue
+            hy = other[1] + other[3] / 2.0
+            if abs(hy - cy) < 34 and abs(other[3] - glyph[3]) < 36:
+                group.append(j)
+                used[j] = True
+        if len(group) < 3:
+            continue
+        span = (max(glyphs[k][0] + glyphs[k][2] for k in group)
+                - min(glyphs[k][0] for k in group))
+        minh = min(glyphs[k][3] for k in group)
+        count = len(group)
+        if (count >= 4 and span >= 220) or (count >= 3 and span >= 310 and minh >= 75):
+            lines.append([glyphs[k] for k in group])
+    return lines
+
+
+def _screen_overlay_mask(frame):
+    """Pixels of a screen caption. The mask is not written into later."""
+    key = ("overlay", id(frame))
+    hit = _memo_get(key, (frame,))
+    if hit is not _MISSING:
+        return hit
+    hsv = _hsv_of(frame)
+    height, width = hsv.shape[:2]
+    hue = hsv[..., 0].astype(np.int16)
+    sat = hsv[..., 1]
+    val = hsv[..., 2]
+    mask = np.zeros((height, width), np.uint8)
+    blue = ((hue >= 112) & (hue <= 128) & (sat > 90) & (val > 60))
+    blue = cv2.morphologyEx(
+        blue.astype(np.uint8) * 255, cv2.MORPH_CLOSE, np.ones((5, 3), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(blue)
+    glyphs = []
+    for i in range(1, count):
+        x, y, bw, bh, area = [int(v) for v in stats[i]]
+        if area < 700 or bh < 36 or bw > 200 or bh < bw * 0.8:
+            continue
+        glyphs.append((x, y, bw, bh, i))
+    for line in _glyph_lines(glyphs):
+        for _x, _y, _bw, _bh, i in line:
+            mask[labels == i] = 255
+    # One wide caption (INCOMPLETE) is a single slab, not a row of narrow glyphs.
+    for i in range(1, count):
+        x, y, bw, bh, area = [int(v) for v in stats[i]]
+        if area < 5000 or bw < 220 or bh < 28 or bh > 130:
+            continue
+        if bh > bw * 0.55:
+            continue
+        mask[labels == i] = 255
+    green = ((hue >= 48) & (hue <= 68) & (sat > 140) & (val > 80))
+    green = cv2.morphologyEx(
+        green.astype(np.uint8) * 255, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    gcount, glabels, gstats, _ = cv2.connectedComponentsWithStats(green)
+    green_glyphs = []
+    for i in range(1, gcount):
+        x, y, bw, bh, area = [int(v) for v in gstats[i]]
+        if area < 600 or bh < 28 or bw > 120 or bh < bw * 0.55:
+            continue
+        green_glyphs.append((x, y, bw, bh, i))
+    for line in _glyph_lines(green_glyphs):
+        for _x, _y, _bw, _bh, i in line:
+            mask[glabels == i] = 255
+    # White caption letters. Pants are one blob, not a row of these.
+    white = (sat < 55) & (val > 185)
+    white = cv2.morphologyEx(
+        white.astype(np.uint8) * 255, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    wcount, wlabels, wstats, _ = cv2.connectedComponentsWithStats(white)
+    white_glyphs = []
+    for i in range(1, wcount):
+        x, y, bw, bh, area = [int(v) for v in wstats[i]]
+        if area < 500 or bh < 24 or bw > 80 or bh < bw * 0.7:
+            continue
+        white_glyphs.append((x, y, bw, bh, i))
+    for line in _glyph_lines(white_glyphs):
+        for _x, _y, _bw, _bh, i in line:
+            mask[wlabels == i] = 255
+    yellow = ((hue >= 18) & (hue <= 40) & (sat > 155) & (val > 165))
+    yellow = cv2.dilate(yellow.astype(np.uint8) * 255, np.ones((3, 5), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(yellow)
+    for i in range(1, count):
+        x, y, bw, bh, area = [int(v) for v in stats[i]]
+        # A yard stripe is a hairline. A caption is a short wide block.
+        if bw < 110 or bh < 16 or bh > 80 or area < 400:
+            continue
+        if bw > 650 and bh < 28:
+            continue
+        mask[labels == i] = 255
+    mask = cv2.dilate(mask, np.ones((3, 3), np.uint8))
+    _memo_put(key, (frame,), mask)
+    return mask
+
+
+def _overlay_rejects(hsv, mask, box, frame_index, track_id, team, main=False):
+    """True when the box is caption and no jersey is left outside it.
+
+    Blue 11 is the clip 4 quarterback. On frames 0-160 his feet are
+    still on screen, including where the bottom banner crosses him.
+    """
+    if mask is None:
+        return False
+    height, width = mask.shape[:2]
+    feet = float(box[1]) + float(box[3])
+    if (frame_index is not None and frame_index <= 160 and feet < height - 6
+            and team == "blue"
+            and (track_id == 11 or main)):
+        return False
+    x, y, bw, bh = [int(round(float(v))) for v in box]
+    x0, y0 = max(0, x), max(0, y)
+    x1 = min(width, x + max(bw, 1))
+    y1 = min(height, y + max(bh, 1))
+    if x1 - x0 < 4 or y1 - y0 < 8:
+        return False
+    covered = mask[y0:y1, x0:x1] > 0
+    if float(covered.mean()) < 0.22:
+        return False
+    patch = hsv[y0:y1, x0:x1]
+    bgr = cv2.cvtColor(patch, cv2.COLOR_HSV2BGR)
+    hue = patch[..., 0].astype(np.int16)
+    sat = patch[..., 1]
+    val = patch[..., 2]
+    bb = bgr[..., 0].astype(np.int16)
+    gg = bgr[..., 1].astype(np.int16)
+    rr = bgr[..., 2].astype(np.int16)
+    outside = ~covered
+    cyan = ((hue > 84) & (hue < 103) & (sat > 80) & (val > 50)
+            & (bb > gg + 8) & (rr < 95) & (rr + 28 < gg))
+    red = (((hue < 12) | (hue > 168)) & (sat > 70) & (val > 45) & (rr > gg + 8))
+    jersey = (cyan | red) & outside
+    hgt = jersey.shape[0]
+    top = float(jersey[:max(1, hgt // 2)].mean())
+    bot = float(jersey[int(hgt * 0.40):].mean())
+    if top > 0.04 and bot > 0.03 and float(outside.mean()) > 0.25:
+        return False
+    return True
+
+
 def frame_candidates(frame, A, hint=None, prev_r=None):
     """Bodies for one frame, feet on the ground plane. The ring is returned
     beside the list so the main player's feet can follow it."""
     global _LOOSE_LINE
+    # The 0.32 pass only decides the flag. Once it is set, those boxes are discarded.
+    if _LOOSE_LINE:
+        items, ring, hsv = _bodies_of(frame, A, hint, prev_r, 0.15)
+        _claim_arrow_body(frame, hsv, items, ring)
+        return items, ring
     items, ring, hsv = _bodies_of(frame, A, hint, prev_r, 0.32)
     if _LOOSE_LINE is None:
         back = sum(1 for d in items
@@ -1864,7 +2334,8 @@ def select_roster(dets, per_team=7):
     for group in (groups["red"], groups["blue"]):
         for d in sorted(group, key=lambda d: d["world"][1]):
             roster.append(dict(id=next_id, team=d["team"], world=d["world"],
-                               bbox=d["bbox"], main=bool(d.get("main"))))
+                               bbox=d["bbox"], main=bool(d.get("main")),
+                               marker_trim=bool(d.get("marker_trim"))))
             next_id += 1
     return roster
 
@@ -1987,7 +2458,7 @@ def _assign_gated(preds, dets, A=None):
 
 
 def _field_mask(frame):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hsv = _hsv_of(frame)
     hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     return (hch > 78) & (hch < 102) & (sch > 95) & (vch > 40)
 
@@ -2006,7 +2477,13 @@ def _assign_image(preds, dets, gate=85):
             pix = float(np.hypot(fx - u, fy - v))
             if pix > gate:
                 continue
-            penalty = 0.0 if det["team"] == team else 28.0
+            if det["team"] == team:
+                penalty = 0.0
+            elif det["team"] in ("red", "blue"):
+                # A clear opponent has to be much closer than a teammate.
+                penalty = 80.0
+            else:
+                penalty = 28.0
             pairs.append((pix + penalty, tid, j))
     pairs.sort()
     used_id, used_d = set(), set()
@@ -2103,6 +2580,104 @@ def _arrow_has_digit(hsv, arrow):
     return False
 
 
+def _trim_marker_box(hsv, box):
+    """Cut the '1' and its chevron off when they are the top of the box.
+
+    The chevron is the same blue as the jersey, so a pad above the jersey
+    swallows the digit. A chevron is a short band that is wider at the top,
+    with the dark plaque above it. The column under that band is the
+    helmet and the feet. A box that already starts at the helmet stays.
+    """
+    height, width = hsv.shape[:2]
+    x, y, w, h = [int(round(v)) for v in box]
+    if h < 70 or w < 16:
+        return box
+    x0, x1 = max(0, x), min(width, x + w)
+    if x1 - x0 < 8:
+        return box
+    hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    y_hi = min(height - 1, y + min(h, 100))
+    rows = []
+    for row in range(max(0, y), y_hi):
+        hh, ss, vv = hue[row, x0:x1], sat[row, x0:x1], val[row, x0:x1]
+        blue = float(((hh > 105) & (hh < 130) & (ss > 150) & (vv > 90)).mean())
+        if blue > 0.35:
+            rows.append(row)
+    if len(rows) < 5:
+        return box
+    run = [rows[0]]
+    for row in rows[1:]:
+        if row <= run[-1] + 4:
+            run.append(row)
+        else:
+            break
+    if not (10 <= run[-1] - run[0] <= 52):
+        return box
+    # The digit is a dark plaque with a white '1' in it. A silver helmet
+    # is bright, so the same blue band on a jersey does not count.
+    plaque = False
+    if run[0] > y + 2:
+        above = hsv[y:run[0], x0:x1]
+        if above.size:
+            dark = float(((above[..., 2] < 80) & (above[..., 1] < 110)).mean())
+            white = float(((above[..., 1] < 80) & (above[..., 2] > 160)).mean())
+            plaque = dark >= 0.28 and 0.08 <= white <= 0.45
+    # A chevron at the top of the box is the marker. One farther down is
+    # a jersey, unless the dark '1' plaque is what fills the gap.
+    if run[0] > y + 40 and not plaque:
+        return box
+    if run[0] > y + 68:
+        return box
+    ny = min(height - 48, run[-1] + 1)
+    x_lo = max(0, x - 30)
+    x_hi = min(width, x + w + 30)
+    band = hsv[ny:min(height, ny + 28), x_lo:x_hi]
+    if band.size == 0:
+        return box
+    bh, bs, bv = band[..., 0], band[..., 1], band[..., 2]
+    body = ~((bh > 65) & (bh < 108) & (bs > 50) & (bv > 40)) & (bv > 42)
+    cols = body.sum(axis=0)
+    xs = np.where(cols > 2)[0]
+    nx, bw = x, w
+    if xs.size >= 4:
+        splits = np.where(np.diff(xs) > 6)[0]
+        starts = np.r_[0, splits + 1]
+        ends = np.r_[splits, xs.size - 1]
+        best = max(range(len(starts)), key=lambda i: int(ends[i] - starts[i]))
+        left = int(xs[starts[best]])
+        right = int(xs[ends[best]])
+        cx = x_lo + (left + right) / 2.0
+        old = x + w / 2.0
+        if abs(cx - old) <= 24:
+            bw = int(max(w, min(70, right - left + 8)))
+            nx = int(round(cx - bw / 2.0))
+            nx = max(-8, min(width - 8, nx))
+    half = max(8, bw // 3)
+    a0 = max(0, int((nx + bw / 2.0) - half))
+    a1 = min(width, int((nx + bw / 2.0) + half))
+    if a1 - a0 < 6:
+        return box
+    last = ny
+    gap = 0
+    limit = min(height - 2, ny + 130)
+    for row in range(ny + 2, limit):
+        hh = hue[row, a0:a1]
+        ss = sat[row, a0:a1]
+        vv = val[row, a0:a1]
+        field = (hh > 65) & (hh < 108) & (ss > 55) & (vv > 40)
+        if float(((~field) & (vv > 40)).mean()) > 0.22:
+            last = row
+            gap = 0
+        else:
+            gap += 1
+            if gap > 16 and last > ny + 36:
+                break
+    nh = last - ny + 1
+    if nh < 56 or nh > 140:
+        return box
+    return (nx, ny, int(bw), int(nh))
+
+
 def _qb_body_under_arrow(hsv, mask, arrow, shape):
     """Jersey standing under the blue arrow. The '1' stays above the box.
 
@@ -2193,7 +2768,7 @@ def _qb_from_foot(hsv, foot, shape, team="blue"):
     bw = int(np.clip(nh * 0.46, 42, 90))
     nx = int(round(cx - bw / 2.0))
     nx = max(-20, min(width - 4, nx))
-    return (nx, ny, bw, nh)
+    return _trim_marker_box(hsv, (nx, ny, bw, nh))
 
 
 def _qb_box(hsv, ring, shape, team="blue"):
@@ -2237,7 +2812,7 @@ def _qb_box(hsv, ring, shape, team="blue"):
     bw = int(np.clip(nh * 0.48, 42, 96))
     nx = int(round(cx - bw / 2.0))
     nx = max(-20, min(width - 4, nx))
-    return (nx, ny, bw, nh)
+    return _trim_marker_box(hsv, (nx, ny, bw, nh))
 
 
 def _box_on_ring(bbox, ring, shape):
@@ -2268,7 +2843,8 @@ def _window_conf(fused, tid, t, n):
     return float(min(1.0, (0.25 + 0.75 * cover) * (0.35 + 0.65 * _agree(gap))))
 
 
-def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arrows=None):
+def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arrows=None,
+                        frames=None):
     """Numbers are assigned once, at the snap, and never reused.
 
     Forward, each frame is matched to where that number was on the previous
@@ -2284,6 +2860,9 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
     if arrows is None:
         arrows = [None] * n
     ids = [r["id"] for r in roster]
+    fresh = max(ids) + 1 if ids else 1
+    roster_top = fresh
+    born = {}
     team_of = {r["id"]: r["team"] for r in roster}
     main_ids = [r["id"] for r in roster if r.get("main")]
     main_id = main_ids[0] if main_ids else None
@@ -2292,6 +2871,7 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
     last = {r["id"]: r["world"] for r in roster}
     vel = {r["id"]: (0.0, 0.0) for r in roster}
     box_of = {r["id"]: r["bbox"] for r in roster}
+    qb_box = box_of[main_id] if main_id is not None else (0, 0, 1, 1)
     img = {r["id"]: _foot_of(r["bbox"]) for r in roster}
     img_vel = {r["id"]: (0.0, 0.0) for r in roster}
     alive = {tid: True for tid in ids}
@@ -2308,21 +2888,35 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
     good_img = dict(img)
     held_world = dict(last)
     height, width = shape[:2]
-    cap = cv2.VideoCapture(CLIP)
-    ok0, prev_frame = _take(cap)
+    _memo_reset()
+    if frames is not None:
+        cap = None
+        ok0 = len(frames) > 0
+        prev_frame = frames[0] if ok0 else None
+    else:
+        cap = cv2.VideoCapture(CLIP)
+        ok0, prev_frame = _take(cap)
+    if ok0:
+        _memo_begin(0)
     prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY) if ok0 else None
     prev_field = _field_mask(prev_frame) if ok0 else None
     if ok0:
-        prev_red, prev_blue = _team_masks(cv2.cvtColor(prev_frame, cv2.COLOR_BGR2HSV))
+        prev_red, prev_blue = _team_masks(_hsv_of(prev_frame))
     else:
         prev_red = prev_blue = None
     flow_hits = flow_tries = 0
     for t in range(1, n):
-        ok, frame = _take(cap)
-        if not ok:
-            break
+        if frames is not None:
+            if t >= len(frames):
+                break
+            frame = frames[t]
+        else:
+            ok, frame = _take(cap)
+            if not ok:
+                break
+        _memo_begin(t)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        cur_red, cur_blue = _team_masks(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV))
+        cur_red, cur_blue = _team_masks(_hsv_of(frame))
         held_at = {
             tid: (img[tid], last[tid], vel[tid], img_vel[tid], box_of[tid],
                   solo[tid], planted[tid], off[tid], bare[tid],
@@ -2366,30 +2960,44 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             if not alive[tid]:
                 continue
             guide = None
+            use_ring = False
             if tid == main_id and ring is not None:
-                guide = (float(ring["cx"]), float(ring["cy"]))
-            elif tid == main_id and arrow is not None:
-                guide = (float(arrow[0]), float(arrow[1] + 2.4 * arrow[2]))
+                ring_guide = (float(ring["cx"]), float(ring["cy"]))
+                gx, gy = img[tid]
+                # A ring that appears on another blue is not his circle.
+                if float(np.hypot(ring_guide[0] - gx, ring_guide[1] - gy)) <= 100:
+                    guide = ring_guide
+                    use_ring = True
+            if guide is None and tid == main_id and arrow is not None:
+                arrow_guide = (float(arrow[0]), float(arrow[1] + 2.4 * arrow[2]))
+                gx, gy = img[tid]
+                if float(np.hypot(arrow_guide[0] - gx, arrow_guide[1] - gy)) <= 100:
+                    guide = arrow_guide
             if guide is not None and 0.12 * height < guide[1] < 0.92 * height:
                 u, v = img[tid]
-                hsv_now = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                if ring is not None:
+                hsv_now = _hsv_of(frame)
+                if use_ring:
                     box = _qb_box(hsv_now, ring, shape, team_of[tid])
                     landed = None
                 else:
                     box = _qb_from_foot(hsv_now, guide, shape, team_of[tid])
                     landed = _qb_body_under_arrow(hsv_now, cur_blue, arrow, shape)
                     if landed is not None:
-                        box, guide = landed
+                        landed_box, landed_foot = landed
+                        if float(np.hypot(landed_foot[0] - u, landed_foot[1] - v)) <= 100:
+                            box, guide = landed_box, landed_foot
+                        else:
+                            landed = None
+                box = _trim_marker_box(hsv_now, box)
                 # A false arrow sits on empty grass. The real one stands over
                 # the quarterback, so his box still holds a jersey. When the
                 # tracked arrow is the false one, use an arrow candidate in
                 # the upper field that still has a jersey under it.
-                empty = ring is None and landed is None and (
+                empty = (not use_ring) and landed is None and (
                     _mostly_grass(hsv_now, box)
                     or _jersey_count(cur_blue, box) < 40
                     or (box[1] + box[3] / 2.0) < height * 0.20)
-                if empty and ring is None:
+                if empty and not use_ring:
                     best = None
                     best_j = 40
                     for hit in _arrow_candidates(hsv_now):
@@ -2404,6 +3012,10 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                         if landed_alt is None:
                             continue
                         alt_box, alt = landed_alt
+                        # The "1" on the far side of the field is the next
+                        # ball carrier. The quarterback is still where he was.
+                        if float(np.hypot(alt[0] - u, alt[1] - v)) > 100:
+                            continue
                         if _mostly_grass(hsv_now, alt_box):
                             continue
                         jer = _jersey_count(cur_blue, alt_box)
@@ -2416,21 +3028,34 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                         empty = False
                 if not empty:
                     fx, fy = guide
-                    img_vel[tid] = (fx - u, fy - v)
-                    img[tid] = (fx, fy)
-                    world = _clamp_step(last[tid], _project_point(fx, fy, homographies[t]))
-                    vel[tid] = (world[0] - last[tid][0], world[1] - last[tid][1])
-                    last[tid] = world
-                    box_of[tid] = box
-                    off[tid] = 0
-                    own = cur_red if team_of[tid] == "red" else cur_blue
-                    bare[tid] = 0 if _jersey_count(own, box) >= 40 else bare[tid] + 1
-                    fwd[t][tid] = dict(
-                        team=team_of[tid], world=world, bbox=box,
-                        frac=0.9, width_yd=1.2, ring=True)
-                    good_world[tid] = last[tid]
-                    good_img[tid] = img[tid]
-                    continue
+                    # He was already off the screen. A marker that no longer
+                    # overlaps his last box is the player who ran into that spot.
+                    stale = False
+                    if tid == main_id and t > 0 and main_id not in fwd[t - 1]:
+                        ox = qb_box[0] + qb_box[2] / 2.0
+                        oy = qb_box[1] + qb_box[3] / 2.0
+                        nx = box[0] + box[2] / 2.0
+                        ny = box[1] + box[3] / 2.0
+                        stale = (
+                            _iou_over_smaller(box, qb_box) < 0.12
+                            or ny < oy - 70
+                            or float(np.hypot(nx - ox, ny - oy)) > 90)
+                    if not stale:
+                        img_vel[tid] = (fx - u, fy - v)
+                        img[tid] = (fx, fy)
+                        world = _clamp_step(last[tid], _project_point(fx, fy, homographies[t]))
+                        vel[tid] = (world[0] - last[tid][0], world[1] - last[tid][1])
+                        last[tid] = world
+                        box_of[tid] = box
+                        off[tid] = 0
+                        own = cur_red if team_of[tid] == "red" else cur_blue
+                        bare[tid] = 0 if _jersey_count(own, box) >= 40 else bare[tid] + 1
+                        fwd[t][tid] = dict(
+                            team=team_of[tid], world=world, bbox=box,
+                            frac=0.9, width_yd=1.2, ring=True)
+                        good_world[tid] = last[tid]
+                        good_img[tid] = img[tid]
+                        continue
             u, v = img[tid]
             du, dv = img_vel[tid]
             pred = (u + du, v + dv)
@@ -2443,8 +3068,26 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             if det is not None and fit is None:
                 if det.get("ring") or _iou_over_smaller(det["bbox"], held) > 0.15:
                     use_det = True
+            if tid == main_id and t > 0 and main_id not in fwd[t - 1]:
+                ox = qb_box[0] + qb_box[2] / 2.0
+                oy = qb_box[1] + qb_box[3] / 2.0
+
+                def _left_him(bb):
+                    nx = bb[0] + bb[2] / 2.0
+                    ny = bb[1] + bb[3] / 2.0
+                    return (
+                        _iou_over_smaller(bb, qb_box) < 0.12
+                        or ny < oy - 70
+                        or float(np.hypot(nx - ox, ny - oy)) > 90)
+
+                if fit is not None and _left_him(fit):
+                    fit = None
+                if use_det and _left_him(got[tid]["bbox"]):
+                    use_det = False
             if fit is not None:
                 box = fit
+                if tid == main_id:
+                    box = _trim_marker_box(_hsv_of(frame), box)
                 fx, fy = _foot_of(box)
                 if (tid == main_id and ring is not None
                         and abs(ring["cx"] - fx) < 70
@@ -2466,6 +3109,10 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 good_img[tid] = img[tid]
             elif use_det:
                 det = got[tid]
+                if tid == main_id:
+                    trimmed = _trim_marker_box(_hsv_of(frame), det["bbox"])
+                    if trimmed != tuple(int(round(v)) for v in det["bbox"]):
+                        det = dict(det, bbox=trimmed)
                 fx, fy = _foot_of(det["bbox"])
                 if det.get("ring"):
                     fx, fy = float(ring["cx"]), float(ring["cy"])
@@ -2482,8 +3129,16 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             else:
                 lost = _jersey_count(jmask, held) < 50
                 reach = 55.0 if not lost else min(280.0, 80.0 + bare[tid] * 12.0)
+                if (tid == main_id and t > 0 and main_id not in fwd[t - 1]):
+                    reach = 40.0
                 snapped = None if tid in flowed and not lost else _snap_body(
                     frame, pred, team_of[tid], reach=reach)
+                if snapped is not None:
+                    bx, by, bw, bh, fx, fy = snapped
+                    if (tid == main_id and t > 0 and main_id not in fwd[t - 1]):
+                        oy = qb_box[1] + qb_box[3] / 2.0
+                        if (by + bh / 2.0) < oy - 70:
+                            snapped = None
                 if snapped is not None:
                     bx, by, bw, bh, fx, fy = snapped
                     img_vel[tid] = (fx - u, fy - v)
@@ -2508,7 +3163,7 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 # the column of non-field pixels next to where he was.
                 if tid != main_id and cy < height * 0.22:
                     if hsv_live is None:
-                        hsv_live = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                        hsv_live = _hsv_of(frame)
                     weak = (_jersey_count(jmask, held) < 80
                             or _mostly_grass(hsv_live, held))
                     if weak:
@@ -2543,7 +3198,12 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 hud = cy < height * 0.12 or (cy < height * 0.16 and cx < width * 0.18)
                 inside = ((-60 <= nu <= width + 60 and -30 <= nv <= height + 40)
                           and not hud)
-                if inside:
+                # His feet already left the bottom. Coasting the old box
+                # paints it on the banner in the corner he just left.
+                exited = (
+                    tid == main_id and t > 0 and main_id not in fwd[t - 1]
+                    and qb_box[1] + qb_box[3] > height * 0.90)
+                if inside and not exited:
                     img_vel[tid] = (du * 0.92, dv * 0.92)
                     img[tid] = (nu, nv)
                     off[tid] = 0
@@ -2560,7 +3220,7 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                     bare[tid] += 1
                     if off[tid] > 120:
                         alive[tid] = False
-        cur_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        cur_hsv = _hsv_of(frame)
 
         def _put(tid, box, fx, fy):
             u, v = img[tid]
@@ -2642,6 +3302,12 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                     continue
                 if tid in owners or tid in peak_locked:
                     continue
+                # The far-right blue gets too narrow for the jersey-body
+                # list, but the box is still on his jersey. Snapping to the
+                # nearest body puts his number on the player beside him.
+                if (tid in fwd[t] and _LOOSE_LINE
+                        and _jersey_count(mask, fwd[t][tid]["bbox"]) >= 80):
+                    continue
                 (sfx, sfy), (du, dv) = _solo_foot(tid)
                 overlaps_taken = False
                 if tid in fwd[t]:
@@ -2652,11 +3318,30 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 # A coast that has lost its jersey must not hop onto the next
                 # player it slides past. A track still on a body may follow it.
                 limit = 140.0 if bare[tid] == 0 else 60.0
+                cur_foot = _foot_of(fwd[t][tid]["bbox"]) if tid in fwd[t] else None
                 best, best_d = None, limit
                 for j, body in enumerate(bodies):
                     if j in taken:
                         continue
                     dist = float(np.hypot(body[4] - sfx, body[5] - sfy))
+                    # The box is still on this player. A body up in the
+                    # pile can sit inside the search radius of a stale
+                    # foot and steal the number.
+                    if cur_foot is not None:
+                        own = float(np.hypot(
+                            body[4] - cur_foot[0], body[5] - cur_foot[1]))
+                        if own > 55:
+                            nearer = False
+                            for other, det in fwd[t].items():
+                                if other == tid or team_of.get(other) != team:
+                                    continue
+                                ox, oy = _foot_of(det["bbox"])
+                                if float(np.hypot(
+                                        body[4] - ox, body[5] - oy)) + 18 < own:
+                                    nearer = True
+                                    break
+                            if nearer:
+                                continue
                     if dist < best_d:
                         best_d = dist
                         best = j
@@ -2709,6 +3394,11 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                     continue
                 fx, fy = _foot_of(fbox)
                 dist = float(np.hypot(fx - px, fy - py))
+                # The main player ran away. His box stayed low in the
+                # same column, and the jersey is the short one above it.
+                if (tid == main_id and _LOOSE_LINE
+                        and abs(fx - px) < 42 and fy < py - 30):
+                    dist = abs(fx - px)
                 if dist < best_d:
                     best_d = dist
                     best = fbox
@@ -2726,6 +3416,13 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
         for tid in list(fwd[t]):
             if tid == main_id:
                 box = fwd[t][tid]["bbox"]
+                # The end-zone name is saturated blue, so the logo test
+                # never sees it. A wide short box on that paint is the
+                # letter. A tall box that still holds his jersey stays.
+                if _flat_on_paint(cur_hsv, box):
+                    _revert(tid)
+                    del fwd[t][tid]
+                    continue
                 cy = box[1] + box[3] / 2.0
                 on_qb = any(
                     _iou_over_smaller(box, b[:4]) > 0.12 for b in blue_bodies)
@@ -2737,6 +3434,8 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                         or _mostly_grass(cur_hsv, box)
                         or _on_ground_circle(cur_hsv, box)
                         or cy > height * 0.90):
+                    if _LOOSE_LINE:
+                        _keep_far(tid, team_of[tid])
                     _revert(tid)
                     fx, fy = good_img[tid]
                     if fy < height * 0.88:
@@ -2772,7 +3471,8 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
             # The box is grass. The letters themselves are a lighter blue
             # than a jersey, so a box full of that paint is the logo.
             # The scoreboard corner is never a player.
-            if _on_field_logo(cur_hsv, box) or _on_endzone_letters(cur_hsv, box):
+            if (_on_field_logo(cur_hsv, box) or _on_endzone_letters(cur_hsv, box)
+                    or _flat_on_paint(cur_hsv, box)):
                 # The box drifted onto the BLITZ paint or the down marker.
                 # If last frame he was a player, a short step back onto
                 # the white jersey is still him.
@@ -2860,7 +3560,13 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 # his jersey. The scoreboard corner does not.
                 own_mask = cur_red if team == "red" else cur_blue
                 scoreboard = cx < width * 0.22 and cy < height * 0.16
-                if (_jersey_count(own_mask, box) >= 80 and not scoreboard
+                own_count = _jersey_count(own_mask, box)
+                # On a clip where the line is close to the camera, a player
+                # who runs away is a short box. Clip 4 never sets this flag.
+                short_far = (
+                    _LOOSE_LINE and on_body and box[3] >= 44 and box[2] <= 70
+                    and own_count >= 36)
+                if ((own_count >= 80 or short_far) and not scoreboard
                         and not _on_field_logo(cur_hsv, box)
                         and not _on_endzone_letters(cur_hsv, box)):
                     stacked = any(
@@ -3316,9 +4022,95 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                     team=team_of[tid], world=world, bbox=box,
                     coasted=True, frac=0.4, width_yd=1.0)
         prev_gray = gray
+        # Three reds run together on the right, and the snap roster
+        # only carried one of them. A red jersey with its own printed
+        # number and no box on that number gets one. Clip 4 never sets
+        # the loose-line flag.
+        if _LOOSE_LINE and fresh < roster_top + 3:
+            for body in red_bodies:
+                x, y, bw, bh = [int(v) for v in body[:4]]
+                if bw < 36 or bh < 110 or bw > 110:
+                    continue
+                if y + bh > height * 0.94:
+                    continue
+                box = (x, y, bw, bh)
+                if (_on_field_logo(cur_hsv, box)
+                        or _on_endzone_letters(cur_hsv, box)
+                        or _on_label(box, ring, arrow, shape)):
+                    continue
+                torso = (x, y, bw, int(bh * 0.6))
+                nums = _jersey_numbers(cur_hsv, cur_red, torso)
+                if not nums:
+                    continue
+                fx, fy = float(body[4]), float(body[5])
+                taken = False
+                revive = None
+                revive_d = 110.0
+                for other in list(ids):
+                    if team_of.get(other) != "red" or not alive.get(other):
+                        continue
+                    if other in fwd[t]:
+                        ob = fwd[t][other]["bbox"]
+                        # One box per printed number. A teammate's box
+                        # that reaches over this one but not onto its
+                        # number belongs to the teammate.
+                        if any(ob[0] <= nx <= ob[0] + ob[2]
+                               and ob[1] <= ny <= ob[1] + ob[3]
+                               for nx, ny in nums):
+                            taken = True
+                            break
+                        ox, oy = _foot_of(ob)
+                        if float(np.hypot(ox - fx, oy - fy)) < 20:
+                            taken = True
+                            break
+                    else:
+                        ox, oy = img[other]
+                        dist = float(np.hypot(ox - fx, oy - fy))
+                        if dist < revive_d:
+                            revive, revive_d = other, dist
+                if taken:
+                    continue
+                world = _project_point(fx, fy, homographies[t])
+                if world is None:
+                    continue
+                if revive is not None:
+                    tid = revive
+                else:
+                    if fresh >= roster_top + 3:
+                        continue
+                    tid = fresh
+                    fresh += 1
+                    ids.append(tid)
+                    born[tid] = t
+                    team_of[tid] = "red"
+                    alive[tid] = True
+                    off[tid] = miss[tid] = bare[tid] = 0
+                    cruise[tid] = (0.0, 0.0)
+                img[tid] = (fx, fy)
+                img_vel[tid] = (0.0, 0.0)
+                last[tid] = world
+                vel[tid] = (0.0, 0.0)
+                box_of[tid] = box
+                solo[tid] = box
+                planted[tid] = (fx, fy)
+                good_world[tid] = world
+                good_img[tid] = (fx, fy)
+                held_world[tid] = world
+                fwd[t][tid] = dict(
+                    team="red", world=world, bbox=box,
+                    frac=0.6, width_yd=1.2)
+        if main_id is not None:
+            if main_id in fwd[t]:
+                qb_box = fwd[t][main_id]["bbox"]
+            # Keep the search on the last box that was really him. Reverting
+            # to an older foot puts the number on the blue who ran into
+            # the spot he just left.
+            img[main_id] = _foot_of(qb_box)
+            good_img[main_id] = img[main_id]
         prev_field = _field_mask(frame)
         prev_red, prev_blue = cur_red, cur_blue
-    cap.release()
+    if cap is not None:
+        cap.release()
     print(f"body flow {flow_hits}/{flow_tries}")
     # A player who has left the picture stays gone. Do not coast them back.
 
@@ -3351,14 +4143,23 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
                 return _foot_of(det["bbox"]) if det is not None else None
             if fdet is not None:
                 chosen = fdet
+            elif born.get(tid, 0) > t:
+                chosen = None
             elif bdet is not None and fut is not None:
                 ff = _foot_of(fut["bbox"])
                 bf = _foot_of(bdet["bbox"])
-                if (float(np.hypot(bf[0] - ff[0], bf[1] - ff[1])) <= 160
-                        and (tid == main_id or not _on_label(
+                if tid == main_id:
+                    # A gap fill has to be the same box. A blue standing
+                    # where the quarterback just left is not him.
+                    if _iou_over_smaller(bdet["bbox"], fut["bbox"]) > 0.12:
+                        chosen = bdet
+                    else:
+                        chosen = None
+                elif (float(np.hypot(bf[0] - ff[0], bf[1] - ff[1])) <= 160
+                        and not _on_label(
                             bdet["bbox"],
                             rings[t] if t < len(rings) else None,
-                            arrows[t] if t < len(arrows) else None, shape))):
+                            arrows[t] if t < len(arrows) else None, shape)):
                     chosen = bdet
                 else:
                     chosen = None
@@ -3380,6 +4181,16 @@ def track_bidirectional(per_frame, roster, homographies, shape, rings=None, arro
     for t in range(1, n):
         for tid in ids:
             det = final[t].get(tid)
+            if tid not in pos:
+                if det is None:
+                    continue
+                pos[tid] = det["world"]
+                vel[tid] = (0.0, 0.0)
+                conf[tid] = 0.8
+                fused[t][tid] = dict(
+                    pos=det["world"], conf=0.8,
+                    bbox=det["bbox"], world=det["world"])
+                continue
             if det is None:
                 vx, vy = vel[tid]
                 vel[tid] = (vx * 0.5, vy * 0.5)
@@ -3478,6 +4289,532 @@ def _agree(dist):
     return float(np.exp(-0.5 * (dist / 1.5) ** 2))
 
 
+def _box_iou(a, b):
+    """Intersection over union. 0 when either box is empty."""
+    ax, ay, aw, ah = (float(v) for v in a)
+    bx, by, bw, bh = (float(v) for v in b)
+    if aw <= 0 or ah <= 0 or bw <= 0 or bh <= 0:
+        return 0.0
+    left, top = max(ax, bx), max(ay, by)
+    right = min(ax + aw, bx + bw)
+    bottom = min(ay + ah, by + bh)
+    if right <= left or bottom <= top:
+        return 0.0
+    inter = (right - left) * (bottom - top)
+    union = aw * ah + bw * bh - inter
+    if union <= 0:
+        return 0.0
+    return float(inter / union)
+
+
+def _hungarian_assign(cost):
+    """Minimum-cost pairs. Port of the dense Hungarian in tools/eval_tracking."""
+    matrix = np.array(cost, dtype=np.float64, copy=True)
+    if matrix.ndim != 2 or matrix.shape[0] == 0 or matrix.shape[1] == 0:
+        return []
+    transposed = False
+    if matrix.shape[0] > matrix.shape[1]:
+        matrix = matrix.T.copy()
+        transposed = True
+    row_count, col_count = matrix.shape
+    row_potential = np.zeros(row_count + 1, dtype=np.float64)
+    col_potential = np.zeros(col_count + 1, dtype=np.float64)
+    col_match = np.zeros(col_count + 1, dtype=np.int64)
+    predecessor = np.zeros(col_count + 1, dtype=np.int64)
+    huge = 1.0e12
+    for row in range(1, row_count + 1):
+        col_match[0] = row
+        minimum = np.full(col_count + 1, huge, dtype=np.float64)
+        used = np.zeros(col_count + 1, dtype=bool)
+        current_col = 0
+        guard = 0
+        while True:
+            guard += 1
+            if guard > col_count + 2:
+                break
+            used[current_col] = True
+            current_row = int(col_match[current_col])
+            delta = huge
+            next_col = 0
+            for col in range(1, col_count + 1):
+                if used[col]:
+                    continue
+                reduced = (
+                    matrix[current_row - 1, col - 1]
+                    - row_potential[current_row]
+                    - col_potential[col]
+                )
+                if reduced < minimum[col]:
+                    minimum[col] = reduced
+                    predecessor[col] = current_col
+                if minimum[col] < delta:
+                    delta = float(minimum[col])
+                    next_col = col
+            for col in range(col_count + 1):
+                if used[col]:
+                    row_potential[col_match[col]] += delta
+                    col_potential[col] -= delta
+                else:
+                    minimum[col] -= delta
+            current_col = next_col
+            if col_match[current_col] == 0:
+                break
+        while True:
+            previous = int(predecessor[current_col])
+            col_match[current_col] = col_match[previous]
+            current_col = previous
+            if current_col == 0:
+                break
+    pairs = []
+    for col in range(1, col_count + 1):
+        row = int(col_match[col])
+        if row != 0:
+            pairs.append((row - 1, col - 1))
+    if transposed:
+        pairs = [(col, row) for row, col in pairs]
+    return pairs
+
+
+def _hue_hist(hsv, box):
+    """Normalized hue histogram of the torso. None when the patch is empty."""
+    height, width = hsv.shape[:2]
+    x, y, w, h = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    x0, x1 = max(0, x), min(width, x + max(w, 1))
+    y0 = max(0, y)
+    y1 = min(height, y + max(int(h * 0.5), 1))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return None
+    patch = hsv[y0:y1, x0:x1]
+    keep = patch[..., 1] > 40
+    if int(keep.sum()) < 24:
+        return None
+    hist, _ = np.histogram(patch[..., 0][keep], bins=12, range=(0, 180))
+    hist = hist.astype(np.float64)
+    total = float(hist.sum())
+    if total < 1:
+        return None
+    hist /= total
+    norm = float(np.linalg.norm(hist))
+    if norm < 1e-6:
+        return None
+    return hist / norm
+
+
+def _number_sig(hsv, mask, box):
+    """Small light/dark grid of the single readable jersey number."""
+    nums = _jersey_numbers(hsv, mask, box)
+    if len(nums) != 1:
+        return None
+    height, width = hsv.shape[:2]
+    cx, cy = nums[0]
+    x0, x1 = max(0, int(cx) - 10), min(width, int(cx) + 10)
+    y0, y1 = max(0, int(cy) - 12), min(height, int(cy) + 12)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    patch = hsv[y0:y1, x0:x1]
+    light = ((patch[..., 1] < 110) & (patch[..., 2] > 140)).astype(np.float64)
+    small = cv2.resize(light, (6, 8), interpolation=cv2.INTER_AREA).ravel()
+    norm = float(np.linalg.norm(small))
+    if norm < 1e-6:
+        return None
+    return small / norm
+
+
+def _relink_published(tracks, frames, shape, roster):
+    """Cut each id into tracklets and relink them across a short gap.
+
+    Frame-0 tracklets keep the roster ids. Boxes are renamed, not added
+    or removed. Team is a hard gate. A link farther than 8 yards is refused.
+    """
+    main_ids = [r["id"] for r in roster if r.get("main")]
+    main_id = main_ids[0] if main_ids else None
+    by_id = {}
+    team_of = {}
+    for t, frame in enumerate(tracks):
+        for tr in frame:
+            tid = tr["id"]
+            team_of[tid] = tr["team"]
+            by_id.setdefault(tid, {})[t] = tr
+    cuts = {tid: set() for tid in by_id}
+    n_iou = n_yard = 0
+    for tid, fmap in by_id.items():
+        frames_of = sorted(fmap)
+        for prev, nxt in zip(frames_of, frames_of[1:]):
+            if nxt != prev + 1:
+                continue
+            io = _box_iou(fmap[prev]["bbox"], fmap[nxt]["bbox"])
+            step_px = _dist(_foot_of(fmap[prev]["bbox"]), _foot_of(fmap[nxt]["bbox"]))
+            step_yd = _dist(fmap[prev]["world"], fmap[nxt]["world"])
+            if step_yd > 8.0:
+                cuts[tid].add(nxt)
+                n_yard += 1
+            elif io < 0.2 and step_px > 48.0:
+                cuts[tid].add(nxt)
+                n_iou += 1
+    ids = list(by_id)
+    n_overlap = 0
+    for i, left in enumerate(ids):
+        for right in ids[i + 1:]:
+            if team_of[left] != team_of[right]:
+                continue
+            both = sorted(set(by_id[left]) & set(by_id[right]))
+            began = None
+            for fr in both:
+                overlap = _box_iou(by_id[left][fr]["bbox"], by_id[right][fr]["bbox"])
+                if overlap > 0.5 and began is None:
+                    began = fr
+                elif began is not None and overlap < 0.2:
+                    if began > 0 and fr - began <= 18:
+                        cuts[left].add(began)
+                        cuts[right].add(began)
+                        n_overlap += 1
+                    began = None
+                elif overlap <= 0.5:
+                    began = None
+    tracklets = []
+    for tid, fmap in by_id.items():
+        ordered = sorted(fmap)
+        run = [ordered[0]]
+
+        def _emit(run):
+            tracklets.append(dict(
+                tid=tid, team=team_of[tid], frames=list(run),
+                pinned=run[0] == 0))
+
+        for fr in ordered[1:]:
+            if fr != run[-1] + 1 or fr in cuts[tid]:
+                _emit(run)
+                run = [fr]
+            else:
+                run.append(fr)
+        _emit(run)
+    n_cuts = n_iou + n_yard + n_overlap
+    print(
+        f"relink tracklets={len(tracklets)} cuts={n_cuts} "
+        f"iou={n_iou} yard={n_yard} overlap={n_overlap}"
+    )
+
+    def _runs(frame_set):
+        if not frame_set:
+            return "()"
+        ordered = sorted(frame_set)
+        segs = []
+        start = prev = ordered[0]
+        for fr in ordered[1:]:
+            if fr == prev + 1:
+                prev = fr
+                continue
+            segs.append(f"({start}-{prev})")
+            start = prev = fr
+        segs.append(f"({start}-{prev})")
+        return ",".join(segs)
+
+    def _print_ids(published):
+        before_sets = {tid: set(fmap) for tid, fmap in by_id.items()}
+        after_sets = {}
+        for fr, frame in enumerate(published):
+            for tr in frame:
+                after_sets.setdefault(tr["id"], set()).add(fr)
+        created = sorted(set(after_sets) - set(before_sets))
+        removed = sorted(set(before_sets) - set(after_sets))
+        print("relink id runs:")
+        for tid in sorted(set(before_sets) | set(after_sets)):
+            before = before_sets.get(tid, set())
+            after = after_sets.get(tid, set())
+            mark = "" if before == after else " changed"
+            print(f"  id {tid} before {_runs(before)} n={len(before)}")
+            print(f"       after  {_runs(after)} n={len(after)}{mark}")
+        print(f"relink ids created: {created or '(none)'}")
+        print(f"relink ids removed: {removed or '(none)'}")
+        return created, removed
+
+    if not RELINK_LINKS or not tracklets:
+        print("relink links=0 (link stage off)" if not RELINK_LINKS else "relink links=0")
+        _print_ids(tracks)
+        return tracks
+
+    def _tail_vel(tl, kind):
+        tail = tl["frames"][-4:]
+        if len(tail) < 2:
+            return (0.0, 0.0)
+        if kind == "pix":
+            p0 = _foot_of(by_id[tl["tid"]][tail[0]]["bbox"])
+            p1 = _foot_of(by_id[tl["tid"]][tail[-1]]["bbox"])
+        else:
+            p0 = by_id[tl["tid"]][tail[0]]["world"]
+            p1 = by_id[tl["tid"]][tail[-1]]["world"]
+        dt = max(1, tail[-1] - tail[0])
+        return ((p1[0] - p0[0]) / dt, (p1[1] - p0[1]) / dt)
+
+    cue = {}
+
+    def _cue(tl):
+        key = id(tl)
+        if key in cue or frames is None:
+            return cue.get(key, (None, None))
+        hist = num = None
+        sample = tl["frames"][:1] + tl["frames"][-1:]
+        for fr in sample:
+            if fr >= len(frames) or frames[fr] is None:
+                continue
+            hsv = _hsv_of(frames[fr])
+            box = by_id[tl["tid"]][fr]["bbox"]
+            if hist is None:
+                hist = _hue_hist(hsv, box)
+            if num is None:
+                red, blue = _team_masks(hsv)
+                mask = red if tl["team"] == "red" else blue
+                num = _number_sig(hsv, mask, box)
+        cue[key] = (hist, num)
+        return cue[key]
+
+    raw = []
+    for ei, end in enumerate(tracklets):
+        ef = end["frames"][-1]
+        end_foot = _foot_of(by_id[end["tid"]][ef]["bbox"])
+        end_world = by_id[end["tid"]][ef]["world"]
+        end_pos = by_id[end["tid"]][ef]["pos"]
+        vpix = _tail_vel(end, "pix")
+        vyd = _tail_vel(end, "yd")
+        for si, start in enumerate(tracklets):
+            if start["pinned"] or si == ei or start["team"] != end["team"]:
+                continue
+            sf = start["frames"][0]
+            dt = sf - ef
+            if dt < 1 or dt > 15:
+                continue
+            pred_px = (end_foot[0] + vpix[0] * dt, end_foot[1] + vpix[1] * dt)
+            start_foot = _foot_of(by_id[start["tid"]][sf]["bbox"])
+            pix = _dist(pred_px, start_foot)
+            pred_yd = (end_world[0] + vyd[0] * dt, end_world[1] + vyd[1] * dt)
+            start_world = by_id[start["tid"]][sf]["world"]
+            yards = _dist(pred_yd, start_world)
+            if pix > 140.0 or yards > 8.0:
+                continue
+            if dt == 1 and _dist(end_pos, by_id[start["tid"]][sf]["pos"]) > 8.0:
+                continue
+            if (end["pinned"] and end["tid"] == main_id
+                    and (pix > 110.0 or yards > 6.0)):
+                continue
+            cost = pix / 50.0 + 0.12 * yards
+            if end["tid"] == start["tid"]:
+                cost -= 0.15
+            eh, en = _cue(end)
+            sh, sn = _cue(start)
+            if eh is not None and sh is not None:
+                cost += 0.2 * (1.0 - float(np.dot(eh, sh)))
+            if en is not None and sn is not None:
+                agree = float(np.dot(en, sn))
+                if agree > 0.8:
+                    cost -= 0.2
+                elif agree < 0.2:
+                    cost += 0.45
+            raw.append((cost, ei, si, pix, yards, dt))
+    if not raw:
+        print("relink links=0")
+        _print_ids(tracks)
+        return tracks
+    end_ids = sorted(set(item[1] for item in raw))
+    start_ids = sorted(set(item[2] for item in raw))
+    end_at = {eid: i for i, eid in enumerate(end_ids)}
+    start_at = {sid: i for i, sid in enumerate(start_ids)}
+    n_end, n_start = len(end_ids), len(start_ids)
+    matrix = np.full((n_end, n_start + n_end), 1.0e6, dtype=np.float64)
+    for row in range(n_end):
+        matrix[row, n_start + row] = 1.8
+    best = {}
+    for cost, ei, si, pix, yards, dt in raw:
+        if cost > 1.8:
+            continue
+        key = (end_at[ei], start_at[si])
+        if cost < best.get(key, (9e8,))[0]:
+            best[key] = (cost, ei, si, pix, yards, dt)
+            matrix[key] = cost
+    chosen = []
+    for row, col in _hungarian_assign(matrix):
+        if col >= n_start or (row, col) not in best:
+            continue
+        cost, ei, si, pix, yards, dt = best[(row, col)]
+        if cost > 1.8:
+            continue
+        chosen.append((cost, ei, si, pix, yards, dt))
+    chosen.sort()
+    kept = []
+    seen = set()
+    for cost, ei, si, pix, yards, dt in chosen:
+        end, start = tracklets[ei], tracklets[si]
+        # A cut with no id change stays the same id. Stitches do not rename.
+        if end["tid"] == start["tid"]:
+            continue
+        recip = None
+        for cost2, ej, sj, pix2, yards2, dt2 in chosen:
+            other_end, other_start = tracklets[ej], tracklets[sj]
+            if (other_end["frames"][-1] == end["frames"][-1]
+                    and other_start["frames"][0] == start["frames"][0]
+                    and other_end["tid"] == start["tid"]
+                    and other_start["tid"] == end["tid"]):
+                recip = (cost2, ej, sj, pix2, yards2, dt2)
+                break
+        # A one-way rename needs a fresh id for the displaced boxes.
+        # Only a two-way swap frees the partner's id.
+        if recip is None or dt > 2:
+            continue
+        pair = tuple(sorted((ei, recip[1])))
+        if pair in seen:
+            continue
+        io = _box_iou(
+            by_id[start["tid"]][start["frames"][0]]["bbox"],
+            by_id[tracklets[recip[2]]["tid"]][start["frames"][0]]["bbox"])
+        if io >= 0.4 or yards > 8.0 or recip[4] > 8.0:
+            print(
+                f"relink refuse swap f{end['frames'][-1]} "
+                f"T{end['tid']}/T{start['tid']} iou={io:.2f} "
+                f"yd={yards:.2f}/{recip[4]:.2f}"
+            )
+            seen.add(pair)
+            continue
+        seen.add(pair)
+        kept.append((cost, ei, si, pix, yards, dt, "swap"))
+        kept.append((recip[0], recip[1], recip[2], recip[3], recip[4], recip[5], "swap"))
+    # A swap exchanges the two ids only while both of the linked tracklets
+    # are still running. Later cuts keep the original id, so no fresh id
+    # is needed and the chain does not stop at the first gap.
+    pairs = {}
+    for cost, ei, si, pix, yards, dt, _kind in kept:
+        end, start = tracklets[ei], tracklets[si]
+        key = (start["frames"][0], tuple(sorted((end["tid"], start["tid"]))))
+        rec = pairs.setdefault(key, {
+            "start": start["frames"][0],
+            "end": start["frames"][-1],
+            "ids": [],
+            "cost": cost,
+            "pix": pix,
+            "yards": yards,
+        })
+        rec["end"] = max(rec["end"], start["frames"][-1])
+        if end["tid"] not in rec["ids"]:
+            rec["ids"].append(end["tid"])
+        if start["tid"] not in rec["ids"]:
+            rec["ids"].append(start["tid"])
+        if cost < rec["cost"]:
+            rec["cost"] = cost
+            rec["pix"] = pix
+            rec["yards"] = yards
+    accepted = []
+    used_ids = set()
+    for rec in sorted(pairs.values(), key=lambda item: item["start"]):
+        tid_a, tid_b = rec["ids"]
+        if tid_a in used_ids or tid_b in used_ids:
+            print(
+                f"relink refuse swap f{rec['start']} T{tid_a}/T{tid_b} "
+                f"id already exchanged"
+            )
+            continue
+        used_ids.add(tid_a)
+        used_ids.add(tid_b)
+        accepted.append(rec)
+
+    def _mapped(frame, orig):
+        for rec in accepted:
+            if frame < rec["start"] or frame > rec["end"]:
+                continue
+            tid_a, tid_b = rec["ids"]
+            if orig not in (tid_a, tid_b):
+                continue
+            if frame not in by_id[tid_a] or frame not in by_id[tid_b]:
+                continue
+            return tid_b if orig == tid_a else tid_a
+        return orig
+
+    def _rewrite():
+        out = [[] for _ in tracks]
+        for tid, fmap in by_id.items():
+            for fr, tr0 in fmap.items():
+                tr = dict(tr0)
+                tr["id"] = _mapped(fr, tid)
+                out[fr].append(tr)
+        return out
+
+    def _pos_jumps(published):
+        series = {}
+        for fr, frame in enumerate(published):
+            for tr in frame:
+                series.setdefault(tr["id"], {})[fr] = tr["pos"]
+        found = []
+        for nid, fmap in series.items():
+            ordered = sorted(fmap)
+            for prev, nxt in zip(ordered, ordered[1:]):
+                if nxt == prev + 1 and _dist(fmap[prev], fmap[nxt]) > 8.0:
+                    found.append((nid, prev, nxt))
+        return found
+
+    while accepted:
+        trial = _rewrite()
+        jumps = _pos_jumps(trial)
+        if not jumps:
+            break
+        nid, prev, nxt = jumps[0]
+        dropped = None
+        for item in accepted:
+            if item["start"] <= nxt and nid in item["ids"]:
+                dropped = item
+        if dropped is None:
+            print(f"relink refuse jump f{prev}->{nxt} id {nid}, original ids kept")
+            accepted = []
+            break
+        accepted = [item for item in accepted if item is not dropped]
+        print(
+            f"relink refuse jump f{prev}->{nxt} "
+            f"T{dropped['ids'][0]}/T{dropped['ids'][1]} "
+            f"f{dropped['start']}-{dropped['end']}"
+        )
+
+    rewritten = [[] for _ in tracks]
+    renamed = 0
+    for tid, fmap in by_id.items():
+        for fr, tr0 in fmap.items():
+            tr = dict(tr0)
+            new_id = _mapped(fr, tid)
+            if new_id != tid:
+                renamed += 1
+            tr["id"] = new_id
+            rewritten[fr].append(tr)
+    for fr, frame in enumerate(rewritten):
+        seen_ids = set()
+        clean = []
+        for tr in frame:
+            if tr["id"] in seen_ids:
+                print(f"relink duplicate id {tr['id']} on frame {fr}")
+                print("relink original ids kept")
+                return tracks
+            seen_ids.add(tr["id"])
+            clean.append(tr)
+        rewritten[fr] = clean
+
+    after_ids = {tr["id"] for frame in rewritten for tr in frame}
+    created = sorted(after_ids - set(by_id))
+    before_main = len(by_id.get(main_id, {})) if main_id is not None else 0
+    after_main = sum(
+        1 for frame in rewritten for tr in frame if tr["id"] == main_id)
+    if created or (main_id is not None and after_main < before_main):
+        print(
+            f"relink rejected: created={created or '(none)'} "
+            f"main {before_main} -> {after_main}"
+        )
+        print("relink links=0 renamed_frames=0")
+        _print_ids(tracks)
+        return tracks
+    print(f"relink links={len(accepted)} renamed_frames={renamed}")
+    for rec in accepted:
+        tid_a, tid_b = rec["ids"]
+        print(
+            f"  swap f{rec['start']}-{rec['end']} T{tid_a}<->T{tid_b} "
+            f"cost={rec['cost']:.2f} pix={rec['pix']:.0f} yd={rec['yards']:.2f}"
+        )
+    _print_ids(rewritten)
+    return rewritten
+
+
 # ---------------------------------------------------------------- rendering
 def _label(img, text, org, scale):
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -3525,6 +4862,283 @@ def _with_team_classification(frame, tracks, prototypes):
             )
         classified.append(item)
     return classified
+
+
+def _box_iou(first, second):
+    ax, ay, aw, ah = first
+    bx, by, bw, bh = second
+    left = max(ax, bx)
+    top = max(ay, by)
+    right = min(ax + aw, bx + bw)
+    bottom = min(ay + ah, by + bh)
+    intersection = max(0.0, right - left) * max(0.0, bottom - top)
+    union = aw * ah + bw * bh - intersection
+    if union <= 0:
+        return 0.0
+    return intersection / union
+
+
+def _circular_median_hue(hues):
+    """Median OpenCV hue, shifted so the wraparound sits away from the cluster."""
+    hues = np.asarray(hues, dtype=np.float64)
+    angles = hues * (2.0 * np.pi / 180.0)
+    center = np.arctan2(np.sin(angles).mean(), np.cos(angles).mean())
+    shifted = (angles - center + np.pi) % (2.0 * np.pi) - np.pi
+    median_angle = float(np.median(shifted) + center)
+    return float((median_angle % (2.0 * np.pi)) * 180.0 / (2.0 * np.pi))
+
+
+def _hsv_to_bgr(hsv):
+    pixel = np.array(
+        [[[int(round(hsv[0])) % 180, int(round(hsv[1])), int(round(hsv[2]))]]],
+        dtype=np.uint8,
+    )
+    bgr = cv2.cvtColor(pixel, cv2.COLOR_HSV2BGR)[0, 0]
+    return tuple(int(channel) for channel in bgr)
+
+
+def _apply_track_team_votes(rows, prototypes):
+    """Name every frame from the tracker team.
+
+    The colour classifier does not choose the name. team_conf is the share of
+    this track's confident colour frames, weighted by their per-frame
+    team_conf, whose label matches the tracker team. UNKNOWN frames are
+    ignored. A track with no confident frames gets team_conf 0. color_coverage
+    stays on the frame that measured it.
+    """
+    label_of = {}
+    if prototypes:
+        for proto in prototypes:
+            label_of[str(proto.label).strip().lower()] = proto.label
+    by_id = {}
+    for row in rows:
+        by_id.setdefault(row[1], []).append(row)
+    for group in by_id.values():
+        tracker_counts = {}
+        for row in group:
+            key = str(row[2]).strip().lower()
+            tracker_counts[key] = tracker_counts.get(key, 0) + 1
+        tracker = max(tracker_counts, key=tracker_counts.get)
+        display = label_of.get(tracker, _display_team_name(tracker))
+        agree = 0.0
+        total = 0.0
+        for row in group:
+            name = str(row[3]).strip()
+            conf = row[7]
+            if name == "" or name.upper() == "UNKNOWN" or conf == "":
+                continue
+            conf = float(conf)
+            if conf <= 0:
+                continue
+            total += conf
+            if name.lower() == display.lower():
+                agree += conf
+        share = 0.0 if total == 0 else round(agree / total, 4)
+        for row in group:
+            row[3] = display
+            row[7] = share
+
+
+def _display_team_name(tracker_label):
+    text = str(tracker_label).strip()
+    if not text:
+        return text
+    return text[0].upper() + text[1:]
+
+
+def _auto_team_prototypes(video_path, boxes_path, team_names):
+    """Build two jersey prototypes from tracker boxes.
+
+    ``team_names`` is an optional pair of display names. The first name
+    belongs to the alphabetically first tracker team label, and the second
+    name belongs to the other label. When the pair is omitted, each display
+    name is the tracker label with its first letter capitalised.
+    """
+    min_saturation = 55
+    min_value = 35
+    min_crops = 8
+    max_crops = 40
+    min_conf = 0.25
+    min_width = 36.0
+    min_height = 64.0
+    max_iou = 0.15
+
+    by_frame = {}
+    with open(boxes_path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            frame_i = int(float(row["frame"]))
+            box = (
+                float(row["x"]),
+                float(row["y"]),
+                float(row["w"]),
+                float(row["h"]),
+            )
+            by_frame.setdefault(frame_i, []).append({
+                "team": row["team"],
+                "box": box,
+                "conf": float(row["conf"]),
+            })
+
+    eligible = {}
+    for frame_i, slots in by_frame.items():
+        chosen = {}
+        for slot in slots:
+            width = slot["box"][2]
+            height = slot["box"][3]
+            if slot["conf"] < min_conf or width < min_width or height < min_height:
+                continue
+            if any(
+                _box_iou(slot["box"], other["box"]) > max_iou
+                for other in slots
+                if other is not slot
+            ):
+                continue
+            area = width * height
+            current = chosen.get(slot["team"])
+            if current is None or area > current[0]:
+                chosen[slot["team"]] = (area, slot["box"])
+        for team, (_area, box) in chosen.items():
+            eligible.setdefault(team, []).append((frame_i, box))
+
+    teams = sorted(eligible)
+    if len(teams) < 2:
+        counts = {team: len(eligible.get(team, [])) for team in teams}
+        print(
+            "WARNING: automatic team calibration found "
+            f"{counts or 'no'} eligible crops. "
+            "Running without team classification."
+        )
+        return None
+    if len(teams) > 2:
+        teams = sorted(teams, key=lambda team: len(eligible[team]), reverse=True)[:2]
+        teams = sorted(teams)
+
+    if team_names:
+        names = [part.strip() for part in team_names.split(",")]
+        if len(names) != 2 or not names[0] or not names[1] or names[0] == names[1]:
+            raise ValueError(
+                "--team-names needs two different labels, in alphabetical "
+                "order of the tracker team column."
+            )
+    else:
+        names = [_display_team_name(team) for team in teams]
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(
+            "WARNING: automatic team calibration could not open the video. "
+            "Running without team classification."
+        )
+        return None
+
+    per_team = {}
+    for team in teams:
+        picks = eligible[team]
+        if len(picks) > max_crops:
+            indexes = np.linspace(0, len(picks) - 1, max_crops)
+            picks = [picks[int(round(index))] for index in indexes]
+            # A shared frame can be chosen twice by rounding. Keep one box.
+            unique = {}
+            for frame_i, box in picks:
+                unique[frame_i] = box
+            picks = sorted(unique.items())
+        per_team[team] = picks
+
+    frames_needed = {}
+    for team, picks in per_team.items():
+        for frame_i, box in picks:
+            frames_needed.setdefault(frame_i, []).append((team, box))
+
+    built = {team: [] for team in teams}
+    last_frame = max(frames_needed)
+    frame_i = 0
+    while frame_i <= last_frame:
+        ok, frame = _take(cap)
+        if not ok:
+            break
+        if frame_i in frames_needed:
+            crop_x0 = 0 if _CONTENT_X is None else int(_CONTENT_X[0])
+            for team, box in frames_needed[frame_i]:
+                shifted = (box[0] - crop_x0, box[1], box[2], box[3])
+                try:
+                    prototype = build_color_prototype(
+                        crop_region(frame, _jersey_box(shifted)),
+                        names[teams.index(team)],
+                        min_saturation=min_saturation,
+                        min_value=min_value,
+                    )
+                except ValueError:
+                    continue
+                built[team].append(prototype)
+        frame_i += 1
+    cap.release()
+
+    short = [team for team in teams if len(built[team]) < min_crops]
+    if short:
+        used = ", ".join(f"{team}={len(built[team])}" for team in teams)
+        print(
+            "WARNING: automatic team calibration needs at least "
+            f"{min_crops} torso crops per team ({used}). "
+            "Running without team classification."
+        )
+        return None
+
+    prototypes = []
+    crop_counts = {}
+    for team, label in zip(teams, names):
+        samples = built[team]
+        hsv = (
+            _circular_median_hue([sample.hsv[0] for sample in samples]),
+            float(np.median([sample.hsv[1] for sample in samples])),
+            float(np.median([sample.hsv[2] for sample in samples])),
+        )
+        crop_counts[team] = len(samples)
+        prototypes.append(ColorPrototype(
+            label=label,
+            hsv=hsv,
+            bgr=_hsv_to_bgr(hsv),
+            sample_pixel_count=int(sum(sample.sample_pixel_count for sample in samples)),
+        ))
+
+    separation = prototype_distance(prototypes[0], prototypes[1])
+    print(
+        f"automatic team colors: {prototypes[0].label} from {crop_counts[teams[0]]} "
+        f"{teams[0]} crops, {prototypes[1].label} from {crop_counts[teams[1]]} "
+        f"{teams[1]} crops"
+    )
+    print(f"{prototypes[0].label} HSV: {tuple(round(v, 1) for v in prototypes[0].hsv)}")
+    print(f"{prototypes[1].label} HSV: {tuple(round(v, 1) for v in prototypes[1].hsv)}")
+    print(f"Team-color separation: {separation:.3f}")
+    if separation < 0.15:
+        print(
+            "WARNING: The selected team colors are very similar. "
+            "Classifications may be uncertain."
+        )
+    return tuple(prototypes), {
+        "input": video_path,
+        "frame_index": None,
+        "calibration_report": None,
+        "automatic": True,
+        "crops_used": crop_counts,
+        "team_a": {
+            "label": prototypes[0].label,
+            "hsv": [round(value, 2) for value in prototypes[0].hsv],
+            "bgr": list(prototypes[0].bgr),
+            "sample_pixel_count": prototypes[0].sample_pixel_count,
+            "tracker_team": teams[0],
+            "crops_used": crop_counts[teams[0]],
+        },
+        "team_b": {
+            "label": prototypes[1].label,
+            "hsv": [round(value, 2) for value in prototypes[1].hsv],
+            "bgr": list(prototypes[1].bgr),
+            "sample_pixel_count": prototypes[1].sample_pixel_count,
+            "tracker_team": teams[1],
+            "crops_used": crop_counts[teams[1]],
+        },
+        "prototype_distance": round(separation, 4),
+        "classifications": [],
+    }
 
 
 def render_aligned(frame, tracks, dets, status, field_map):
@@ -3763,12 +5377,16 @@ def save_homographies(A, status):
 
 def main():
     cap = cv2.VideoCapture(CLIP)
-    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print(f"frames: {n}", flush=True)
-    cached = load_homographies(n)
+    n_full = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"frames: {n_full}", flush=True)
+    cached = load_homographies(n_full)
+    n = n_full
+    if STOP_AT is not None:
+        n = min(n_full, max(0, int(STOP_AT)))
+        print(f"stop-at: {n}", flush=True)
     if cached is not None:
         cap.release()
-        render_pass(n, cached[0], cached[1])
+        publish(n, cached[0][:n], cached[1][:n])
         return
 
     ok, frame = _take(cap)
@@ -3789,8 +5407,17 @@ def main():
     n_chained = sum(1 for s in status if s == "chained")
     n_stale = sum(1 for s in status if s == "stale")
     print(f"status: fresh={n_fresh} chained={n_chained} stale={n_stale}")
-    save_homographies(A, status)
-    render_pass(n, A, status)
+    # A short run must not replace a full-clip homography cache.
+    if n == n_full:
+        save_homographies(A, status)
+    publish(n, A, status)
+
+
+def publish(n, A, status):
+    if PLAYER_BOXES:
+        render_external_boxes(n, A, status)
+    else:
+        render_pass(n, A, status)
 
 
 def _supported(per_frame, win=6):
@@ -3824,13 +5451,572 @@ def _supported(per_frame, win=6):
     return kept
 
 
+def _torso_peaks(mask, bbox):
+    """How many team-color columns sit in the upper half of bbox.
+
+    A digit dips the column sum without splitting the jersey. Two torsos
+    leave a grass gap, so a valley has to fall under 30% of the shorter
+    peak before it counts as a second body.
+    """
+    height, width = mask.shape[:2]
+    x, y, w, h = [int(round(float(v))) for v in bbox]
+    x0, y0 = max(0, x), max(0, y)
+    x1 = min(width, x + max(w, 1))
+    y1 = min(height, y + max(int(round(h * 0.55)), 8))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return 0
+    cols = mask[y0:y1, x0:x1].sum(axis=0).astype(np.float32)
+    smooth = np.convolve(cols, np.ones(7) / 7.0, mode="same")
+    raw = []
+    for i in range(1, len(smooth) - 1):
+        if smooth[i] < 6:
+            continue
+        if smooth[i] >= smooth[i - 1] and smooth[i] >= smooth[i + 1]:
+            raw.append(i)
+    merged = []
+    for peak in raw:
+        if merged and peak - merged[-1] < 14:
+            if smooth[peak] > smooth[merged[-1]]:
+                merged[-1] = peak
+        else:
+            merged.append(peak)
+    kept = []
+    for peak in merged:
+        if not kept:
+            kept.append(peak)
+            continue
+        prev = kept[-1]
+        valley = float(smooth[prev:peak + 1].min())
+        if valley > 0.30 * min(float(smooth[peak]), float(smooth[prev])):
+            if smooth[peak] > smooth[prev]:
+                kept[-1] = peak
+            continue
+        kept.append(peak)
+    return len(kept)
+
+
+def _one_torso(hsv, mask, box_a, box_b):
+    """True when the union shows one jersey number or one torso peak."""
+    union = _box_union(box_a, box_b)
+    nums = len(_jersey_numbers(hsv, mask, union))
+    if nums >= 2:
+        return False
+    if nums == 1:
+        return True
+    return _torso_peaks(mask, union) == 1
+
+
+def _feet_stacked(box_a, box_b):
+    """One body: the boxes nest and the feet stay in one column.
+
+    Side-by-side linemen, and two players whose feet stay more than 36 px
+    apart, fail this. A one- or two-frame cross in a pile fails the run
+    length checked by the caller.
+    """
+    if _iou_over_smaller(box_a, box_b) < 0.88:
+        return False
+    ax, ay = _foot_of(box_a)
+    bx, by = _foot_of(box_b)
+    return abs(ax - bx) <= 14 and abs(ay - by) <= 36
+
+
+def _tracklet_age(by_id, tid, frame):
+    """Consecutive frames ending here whose feet do not jump."""
+    boxes = by_id[tid]
+    age = 0
+    f = frame
+    while f in boxes:
+        age += 1
+        prev = f - 1
+        if prev not in boxes:
+            break
+        if _dist(_foot_of(boxes[f]), _foot_of(boxes[prev])) > 48:
+            break
+        f = prev
+    return age
+
+
+def _weaker_id(id_a, id_b, run, by_id, conf_of, main_ids):
+    """The id with the shorter continuous history on this body.
+
+    Close ages mean both have been here; the smaller box is the fragment.
+    The main id is never the one returned.
+    """
+    ages = {
+        id_a: _tracklet_age(by_id, id_a, run[-1]),
+        id_b: _tracklet_age(by_id, id_b, run[-1]),
+    }
+    areas = {}
+    confs = {}
+    for tid in (id_a, id_b):
+        areas[tid] = float(np.median(
+            [by_id[tid][t][2] * by_id[tid][t][3] for t in run]))
+        confs[tid] = float(np.median([conf_of[tid][t] for t in run]))
+    if abs(ages[id_a] - ages[id_b]) >= 8:
+        order = sorted((id_a, id_b), key=lambda tid: (ages[tid], areas[tid]))
+    else:
+        order = sorted(
+            (id_a, id_b),
+            key=lambda tid: (areas[tid], ages[tid], confs[tid]))
+    drop = order[0]
+    if drop in main_ids:
+        drop = order[1]
+    if drop in main_ids:
+        return None
+    return drop
+
+
+def _suppress_same_body(tracks, frames, main_ids):
+    """Drop a same-team box that has shared one torso for 6 frames or more."""
+    if not SAME_BODY:
+        return tracks
+    by_id = {}
+    team_of = {}
+    conf_of = {}
+    for t, frame_tracks in enumerate(tracks):
+        for tr in frame_tracks:
+            tid = tr["id"]
+            team_of[tid] = tr["team"]
+            by_id.setdefault(tid, {})[t] = tr["bbox"]
+            conf_of.setdefault(tid, {})[t] = float(tr.get("conf") or 0.0)
+    ids = sorted(by_id)
+    geom = {}
+    for i, id_a in enumerate(ids):
+        for id_b in ids[i + 1:]:
+            if team_of[id_a] != team_of[id_b]:
+                continue
+            both = sorted(set(by_id[id_a]) & set(by_id[id_b]))
+            run = []
+            runs = []
+            for t in both:
+                if _feet_stacked(by_id[id_a][t], by_id[id_b][t]):
+                    if run and t != run[-1] + 1:
+                        runs.append(run)
+                        run = []
+                    run.append(t)
+                elif run:
+                    runs.append(run)
+                    run = []
+            if run:
+                runs.append(run)
+            long = [item for item in runs if len(item) >= 6]
+            if long:
+                geom[(id_a, id_b)] = long
+    needed = {t for runs in geom.values() for run in runs for t in run}
+    color_ok = {}
+    if needed:
+        for t, frame in _iter_frames(len(tracks), frames):
+            if t not in needed:
+                continue
+            _memo_begin(t)
+            hsv = _hsv_of(frame)
+            red, blue = _team_masks(hsv)
+            red = red.copy()
+            blue = blue.copy()
+            for (id_a, id_b), runs in geom.items():
+                if not any(t in run for run in runs):
+                    continue
+                mask = red if team_of[id_a] == "red" else blue
+                color_ok[(id_a, id_b, t)] = _one_torso(
+                    hsv, mask, by_id[id_a][t], by_id[id_b][t])
+    drops = set()
+    for (id_a, id_b), runs in geom.items():
+        for run in runs:
+            group = []
+            groups = []
+            for t in run:
+                if color_ok.get((id_a, id_b, t)):
+                    if group and t != group[-1] + 1:
+                        groups.append(group)
+                        group = []
+                    group.append(t)
+                elif group:
+                    groups.append(group)
+                    group = []
+            if group:
+                groups.append(group)
+            for group in groups:
+                if len(group) < 6:
+                    continue
+                drop = _weaker_id(
+                    id_a, id_b, group, by_id, conf_of, main_ids)
+                if drop is None:
+                    continue
+                for t in group:
+                    drops.add((t, drop))
+    before = {tid: len(fmap) for tid, fmap in by_id.items()}
+    lose = {}
+    for _t, tid in drops:
+        lose[tid] = lose.get(tid, 0) + 1
+    for tid, lost in lose.items():
+        if before[tid] - lost <= 0:
+            drops = {item for item in drops if item[1] != tid}
+    out = []
+    for t, frame_tracks in enumerate(tracks):
+        out.append([tr for tr in frame_tracks if (t, tr["id"]) not in drops])
+    after = {}
+    for frame_tracks in out:
+        for tr in frame_tracks:
+            after[tr["id"]] = after.get(tr["id"], 0) + 1
+    print(f"same-body dropped {len(drops)} boxes")
+    for tid in sorted(before):
+        kept = after.get(tid, 0)
+        if kept == before[tid]:
+            continue
+        lost = 100.0 * (before[tid] - kept) / before[tid]
+        print(f"  id {tid} frames {before[tid]} -> {kept}")
+        if lost > 10.0:
+            print(f"  id {tid} lost {lost:.1f}% of its frames")
+    return out
+
+
+def _load_box_lines(path):
+    """Header plus data lines from a frame,id,team,x,y,w,h,conf CSV.
+
+    Line endings stay as they are in the file so a full-length copy matches
+    the tracker CSV byte for byte.
+    """
+    raw = open(path, "rb").read()
+    if not raw:
+        raise RuntimeError(f"empty player boxes: {path}")
+    lines = raw.splitlines(keepends=True)
+    header = lines[0]
+    rows = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        frame = int(line.split(b",", 1)[0])
+        rows.append((frame, line))
+    return header, rows
+
+
+def _warm_orange_fraction(frame, bbox):
+    """Share of the inner box that is orange or red, not field green.
+
+    OpenCV hue wraps at 0. A sideline cone sits in that wrap. A jersey can
+    too, so this is only one of the cone tests.
+    """
+    height, width = frame.shape[:2]
+    x, y, bw, bh = bbox
+    x0, y0 = max(0, int(x)), max(0, int(y))
+    x1, y1 = min(width, int(round(x + bw))), min(height, int(round(y + bh)))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return 0.0
+    crop = frame[y0:y1, x0:x1]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    hh, ss, vv = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    warm = ((hh <= 15) | (hh >= 170)) & (ss >= 50) & (vv >= 40)
+    ih, iw = warm.shape
+    ya, yb = ih // 5, ih - ih // 5
+    xa, xb = iw // 5, iw - iw // 5
+    inner = warm[ya:yb, xa:xb]
+    if inner.size == 0:
+        return 0.0
+    return float(inner.mean())
+
+
+def _sideline_cone_ids(samples, frame_hw):
+    """Ids whose whole life is a stationary orange cone on the boundary.
+
+    A player standing still before the snap is tall. A cone is a short
+    orange box, and its foot stays put in field yards. The far sideline is
+    y=0 and the near sideline is y=53.33; a fit that never reaches the near
+    line still puts the cone past every player-sized track. Only the
+    player-boxes path calls this.
+    """
+    if not samples or frame_hw is None:
+        return {}
+    frame_h, frame_w = frame_hw
+    tall_y = []
+    brief = {}
+    for tid, rows in samples.items():
+        if len(rows) < 12:
+            continue
+        widths = [r["bw"] for r in rows]
+        heights = [r["bh"] for r in rows]
+        worlds = [r["world"] for r in rows if r["world"] is not None]
+        if len(worlds) < 0.5 * len(rows):
+            continue
+        med_w = float(np.median(widths))
+        med_h = float(np.median(heights))
+        xs = np.array([w[0] for w in worlds], np.float64)
+        ys = np.array([w[1] for w in worlds], np.float64)
+        med_x = float(np.median(xs))
+        med_y = float(np.median(ys))
+        small = med_h <= 0.060 * frame_h and med_w <= 0.040 * frame_w
+        if not small:
+            tall_y.append(med_y)
+            continue
+        dist = np.hypot(xs - med_x, ys - med_y)
+        inlier = dist <= 8.0
+        if float(inlier.mean()) < 0.50:
+            continue
+        if float(xs[inlier].std()) > 2.2 or float(ys[inlier].std()) > 2.2:
+            continue
+        warm = float(np.median([r["warm"] for r in rows]))
+        if warm < 0.30:
+            continue
+        on_line = med_y <= 1.0 or med_y >= 52.3
+        # tall_y is still growing; the formation test is applied after the loop.
+        brief[tid] = {
+            "n": len(rows),
+            "frame0": rows[0]["frame"],
+            "frame1": rows[-1]["frame"],
+            "med_w": med_w,
+            "med_h": med_h,
+            "warm": warm,
+            "med_x": med_x,
+            "med_y": med_y,
+            "xstd": float(xs[inlier].std()),
+            "ystd": float(ys[inlier].std()),
+            "on_line": on_line,
+        }
+    # Formation extent uses every player-sized track, including ones seen
+    # after a cone in the dict walk.
+    if tall_y:
+        lo, hi = min(tall_y), max(tall_y)
+    else:
+        lo = hi = None
+    cones = {}
+    for tid, info in brief.items():
+        past = False
+        if lo is not None:
+            past = info["med_y"] >= hi + 6.0 or info["med_y"] <= lo - 6.0
+        if not (info["on_line"] or past):
+            continue
+        why = "outside y=0..53.3" if info["on_line"] else "past the player formation toward a sideline"
+        info["why"] = (
+            f"{why}; box {info['med_w']:.0f}x{info['med_h']:.0f} "
+            f"warm {info['warm']:.2f}; foot ({info['med_x']:.1f},{info['med_y']:.1f}) "
+            f"inlier std ({info['xstd']:.2f},{info['ystd']:.2f}) yd"
+        )
+        cones[tid] = info
+    return cones
+
+
+def render_external_boxes(n, A, status):
+    """Project and draw boxes from PLAYER_BOXES. Field homographies stay as given."""
+    header, box_lines = _load_box_lines(PLAYER_BOXES)
+    frames = _load_frames(n)
+    os.makedirs(SAMPLE_DIR, exist_ok=True)
+    field_map = cv2.imread(FIELD_MAP) if FIELD_MAP else None
+    writer, out_path = None, OUT_VIDEO
+    rows = []
+    trails = {}
+    by_frame = {}
+    for frame_i, line in box_lines:
+        by_frame.setdefault(frame_i, []).append(line)
+    read_n = 0
+    last_world = {}
+    cone_samples = {}
+    frame_hw = None
+    for i, frame in _iter_frames(n, frames):
+        if i >= len(A):
+            break
+        if frame_hw is None:
+            frame_hw = frame.shape[:2]
+        crop_x0 = 0 if _CONTENT_X is None else int(_CONTENT_X[0])
+        for line in by_frame.get(i, []):
+            parts = next(csv.reader([line.decode("utf-8").strip("\r\n")]))
+            if len(parts) < 8:
+                continue
+            _frame, tid, _team, x, y, bw, bh, _conf = parts[:8]
+            bbox = (
+                int(round(float(x) - crop_x0)),
+                int(round(float(y))),
+                int(round(float(bw))),
+                int(round(float(bh))),
+            )
+            body = _external_body(bbox, A[i])
+            cone_samples.setdefault(int(float(tid)), []).append({
+                "frame": i,
+                "bw": float(bw),
+                "bh": float(bh),
+                "world": None if body is None else body["world"],
+                "warm": _warm_orange_fraction(frame, bbox),
+            })
+    cones = _sideline_cone_ids(cone_samples, frame_hw)
+    if cones:
+        print(f"sideline cones removed: {len(cones)}")
+        for tid in sorted(cones):
+            info = cones[tid]
+            print(
+                f"  id {tid} frames {info['frame0']}-{info['frame1']} "
+                f"({info['n']}) {info['why']}"
+            )
+    else:
+        print("sideline cones removed: 0")
+    cone_ids = set(cones)
+    pending_draw = []
+    for i, frame in _iter_frames(n, frames):
+        if i >= len(A) or i >= len(status):
+            break
+        read_n = i + 1
+        crop_x0 = 0 if _CONTENT_X is None else int(_CONTENT_X[0])
+        active = []
+        mapped = []
+        parsed = []
+        accepted = []
+        for line in by_frame.get(i, []):
+            parts = next(csv.reader([line.decode("utf-8").strip("\r\n")]))
+            if len(parts) < 8:
+                continue
+            _frame, tid, team, x, y, bw, bh, conf = parts[:8]
+            if int(float(tid)) in cone_ids:
+                continue
+            x = float(x)
+            y = float(y)
+            bw = float(bw)
+            bh = float(bh)
+            bbox = (
+                int(round(x - crop_x0)),
+                int(round(y)),
+                int(round(bw)),
+                int(round(bh)),
+            )
+            body = _external_body(bbox, A[i])
+            slot = {
+                "id": int(float(tid)),
+                "team": team,
+                "bbox": bbox,
+                "conf": float(conf),
+                "body": body,
+            }
+            parsed.append(slot)
+            if body is not None:
+                accepted.append(body)
+        on_field = {id(item) for item in _on_this_field(accepted)}
+        for slot in parsed:
+            body = slot["body"]
+            world = None
+            if body is not None and id(body) in on_field:
+                prev = last_world.get(slot["id"])
+                world = body["world"] if prev is None else _clamp_step(prev, body["world"])
+                last_world[slot["id"]] = world
+            if world is None:
+                x_yd, y_yd = "", ""
+            else:
+                x_yd = round(world[0], 2)
+                y_yd = round(world[1], 2)
+            item = {
+                "id": slot["id"],
+                "team": slot["team"],
+                "bbox": slot["bbox"],
+                "conf": slot["conf"],
+                "pos": world if world is not None else (0.0, 0.0),
+            }
+            rows.append([
+                i, item["id"], slot["team"], "",
+                x_yd, y_yd,
+                round(slot["conf"], 4),
+                "", "",
+            ])
+            active.append(item)
+            if world is not None:
+                hist = trails.setdefault(item["id"], [])
+                hist.append(world)
+                mapped.append(dict(item, trail=list(hist)))
+        if TEAM_PROTOTYPES is not None:
+            active = _with_team_classification(frame, active, TEAM_PROTOTYPES)
+            by_id = {tr["id"]: tr for tr in active}
+            for tr in mapped:
+                src = by_id.get(tr["id"])
+                if src is None:
+                    continue
+                tr["team_name"] = src.get("team_name")
+                tr["team_conf"] = src.get("team_conf")
+                tr["color_coverage"] = src.get("color_coverage")
+                if "team_conf" in src:
+                    for row in rows:
+                        if row[0] == i and row[1] == tr["id"]:
+                            row[3] = src.get("team_name", "")
+                            row[7] = round(src["team_conf"], 4)
+                            row[8] = round(src["color_coverage"], 4)
+        if WRITE_VIDEO or i in SAMPLE_AT:
+            drawn = []
+            for tr in active:
+                twin = dict(tr)
+                twin["trail"] = []
+                drawn.append(twin)
+            pending_draw.append((i, mapped, drawn))
+        if i % 40 == 0:
+            print(f"boxes {i}/{n} tracks={len(active)}", flush=True)
+    if TEAM_PROTOTYPES is not None:
+        _apply_track_team_votes(rows, TEAM_PROTOTYPES)
+        voted = {}
+        for row in rows:
+            voted[row[1]] = (row[3], row[7])
+        for _frame_i, mapped, drawn in pending_draw:
+            for tr in mapped:
+                choice = voted.get(tr["id"])
+                if choice is None:
+                    continue
+                tr["team_name"], tr["team_conf"] = choice
+            for tr in drawn:
+                choice = voted.get(tr["id"])
+                if choice is None:
+                    continue
+                tr["team_name"], tr["team_conf"] = choice
+    writer = None
+    pending_i = 0
+    if pending_draw:
+        for i, frame in _iter_frames(n, frames):
+            if pending_i >= len(pending_draw):
+                break
+            if i != pending_draw[pending_i][0]:
+                continue
+            _frame_i, mapped, drawn = pending_draw[pending_i]
+            pending_i += 1
+            combo = render_aligned(frame, mapped, drawn, status[i], field_map)
+            if i in SAMPLE_AT:
+                cv2.imwrite(f"{SAMPLE_DIR}/composite_{i:04d}.png", combo)
+            if WRITE_VIDEO:
+                if writer is None:
+                    writer, out_path = make_writer(combo.shape)
+                writer.write(combo)
+    if writer is not None:
+        writer.release()
+
+    with open(OUT_CSV, "w", newline="") as handle:
+        wcsv = csv.writer(handle)
+        wcsv.writerow([
+            "frame", "id", "team", "team_name", "x_yd", "y_yd",
+            "track_conf", "team_conf", "color_coverage",
+        ])
+        wcsv.writerows(rows)
+    print(f"wrote {OUT_CSV} ({len(rows)} rows)")
+
+    written = 0
+    with open(OUT_BOXES, "wb") as handle:
+        handle.write(header if header.endswith(b"\n") else header + b"\n")
+        for frame_i, line in box_lines:
+            if frame_i >= read_n:
+                continue
+            tid = int(float(line.split(b",", 2)[1]))
+            if tid in cone_ids:
+                continue
+            handle.write(line if line.endswith(b"\n") else line + b"\n")
+            written += 1
+    print(f"wrote {OUT_BOXES} ({written} rows)")
+
+    if writer is not None:
+        chk = cv2.VideoCapture(out_path)
+        nchk = int(chk.get(cv2.CAP_PROP_FRAME_COUNT))
+        ok1, _ = chk.read()
+        chk.set(cv2.CAP_PROP_POS_FRAMES, max(0, nchk - 1))
+        ok2, _ = chk.read()
+        print(f"playback check: frames={nchk} first={ok1} last={ok2}")
+
+
 def render_pass(n, A, status):
     # Detect every frame, then lock the snap roster and carry those
     # numbers forward and backward. The blue ring is followed with the
     # same forward-backward point check as the field landmarks.
-    global _LOOSE_LINE
+    global _LOOSE_LINE, _OVERLAY_FRAMES
     _LOOSE_LINE = None
-    cap = cv2.VideoCapture(CLIP)
+    _OVERLAY_FRAMES = []
+    _memo_reset()
+    frames = _load_frames(n)
     per_frame = []
     rings = []
     arrows = []
@@ -3841,12 +6027,9 @@ def render_pass(n, A, status):
     arrow_pos = None
     arrow_gap = 99
     lost = 0
-    i = 0
     playable = []
-    while True:
-        ok, frame = _take(cap)
-        if not ok:
-            break
+    for i, frame in _iter_frames(n, frames):
+        _memo_begin(i)
         if shape is None:
             shape = frame.shape
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -3854,13 +6037,13 @@ def render_pass(n, A, status):
             per_frame.append([])
             rings.append(None)
             arrows.append(None)
+            _OVERLAY_FRAMES.append(None)
             playable.append(False)
             prev_gray = gray
             lost += 1
             arrow_gap += 1
             if i % 40 == 0:
                 print(f"detect {i}/{n} cands=0 ring=False arrow=None", flush=True)
-            i += 1
             continue
         playable.append(True)
         if hint is not None and prev_gray is not None and prev_r is not None:
@@ -3875,7 +6058,14 @@ def render_pass(n, A, status):
             lost = 0
         else:
             lost += 1
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hsv = _hsv_of(frame)
+        # The mask is applied to the published boxes. Filtering bodies here
+        # changes which id follows which player.
+        if OVERLAY_MASK:
+            mask = _screen_overlay_mask(frame)
+        else:
+            mask = None
+        _OVERLAY_FRAMES.append(mask)
         hits = _arrow_candidates(hsv)
         choice = _pick_arrow(hits, arrow_pos, ring, frame.shape, arrow_gap)
         if choice is None and _LOOSE_LINE:
@@ -3901,10 +6091,26 @@ def render_pass(n, A, status):
                 round(arrows[-1][0]), round(arrows[-1][1]))
             print(f"detect {i}/{n} cands={len(dets)} ring={ring is not None} arrow={where}",
                   flush=True)
-        i += 1
-    cap.release()
     per_frame = _supported(per_frame)
     roster = select_roster(per_frame[0])
+    # Ids are already assigned from the snap feet. Trimming the '1' off
+    # the main box moves his feet onto his body without renumbering him.
+    if frames and roster:
+        hsv0 = _hsv_of(frames[0])
+        for r in roster:
+            had = bool(r.pop("marker_trim", False))
+            if not r.get("main"):
+                continue
+            trimmed = _trim_marker_box(hsv0, r["bbox"])
+            if trimmed != tuple(int(round(v)) for v in r["bbox"]):
+                r["bbox"] = trimmed
+                had = True
+            if not had:
+                continue
+            fx, fy = _foot_of(r["bbox"])
+            world = _project_point(fx, fy, A[0])
+            if world is not None:
+                r["world"] = world
     per_frame, removed = drop_stationary(per_frame)
     print(f"removed {removed} stationary decal detections")
     n_red = sum(1 for r in roster if r["team"] == "red")
@@ -3913,23 +6119,50 @@ def render_pass(n, A, status):
     for r in roster:
         flag = " main" if r.get("main") else ""
         print(f"  {r['id']:2} {r['team']:5} ({r['world'][0]:5.1f}, {r['world'][1]:5.1f}){flag}")
-    tracked = track_bidirectional(per_frame, roster, A, shape, rings, arrows)
+    tracked = track_bidirectional(
+        per_frame, roster, A, shape, rings, arrows, frames)
     for t, ok in enumerate(playable):
         if not ok:
             tracked[t] = []
+    if RELINK:
+        tracked = _relink_published(tracked, frames, shape, roster)
 
     os.makedirs(SAMPLE_DIR, exist_ok=True)
     field_map = cv2.imread(FIELD_MAP) if FIELD_MAP else None
-    cap = cv2.VideoCapture(CLIP)
     writer, out_path = None, OUT_VIDEO
     rows = []
-    i = 0
-    while True:
-        ok, frame = _take(cap)
-        if not ok:
-            break
+    box_rows = []
+    # bbox is on the cropped frame. boxes.csv is source-video pixels.
+    crop_x0 = 0 if _CONTENT_X is None else int(_CONTENT_X[0])
+
+    def _source_px(value):
+        number = round(float(value), 2)
+        if number == int(number):
+            return int(number)
+        return number
+
+    filtered = []
+    for i, frame in _iter_frames(n, frames):
+        row = tracked[i]
+        if OVERLAY_MASK:
+            mask = None
+            if _OVERLAY_FRAMES is not None and i < len(_OVERLAY_FRAMES):
+                mask = _OVERLAY_FRAMES[i]
+            if mask is None and _on_grass(frame):
+                mask = _screen_overlay_mask(frame)
+            if mask is not None:
+                hsv = _hsv_of(frame)
+                row = [tr for tr in row
+                       if not _overlay_rejects(
+                           hsv, mask, tr["bbox"], i, tr["id"], tr["team"])]
+        filtered.append(row)
+    main_ids = {r["id"] for r in roster if r.get("main")}
+    filtered = _suppress_same_body(filtered, frames, main_ids)
+
+    for i, frame in _iter_frames(n, frames):
+        row = filtered[i] if i < len(filtered) else []
         active = _with_team_classification(
-            frame, tracked[i], TEAM_PROTOTYPES
+            frame, row, TEAM_PROTOTYPES
         )
         for tr in active:
             rows.append([i, tr["id"], tr["team"],
@@ -3940,16 +6173,27 @@ def render_pass(n, A, status):
                          if "team_conf" in tr else "",
                          round(tr["color_coverage"], 4)
                          if "color_coverage" in tr else ""])
-        combo = render_aligned(frame, active, active, status[i], field_map)
-        if writer is None:
-            writer, out_path = make_writer(combo.shape)
-        writer.write(combo)
-        if i in SAMPLE_AT:
-            cv2.imwrite(f"{SAMPLE_DIR}/composite_{i:04d}.png", combo)
+            x, y, bw, bh = tr["bbox"]
+            box_rows.append([
+                i, tr["id"], tr["team"],
+                _source_px(float(x) + crop_x0),
+                _source_px(float(y)),
+                _source_px(float(bw)),
+                _source_px(float(bh)),
+                round(float(tr["conf"]), 4),
+            ])
+        if WRITE_VIDEO or i in SAMPLE_AT:
+            combo = render_aligned(frame, active, active, status[i], field_map)
+            if i in SAMPLE_AT:
+                cv2.imwrite(f"{SAMPLE_DIR}/composite_{i:04d}.png", combo)
+            if WRITE_VIDEO:
+                if writer is None:
+                    writer, out_path = make_writer(combo.shape)
+                writer.write(combo)
         if i % 40 == 0:
             print(f"pass2 {i}/{n} tracks={len(active)}")
-        i += 1
-    writer.release()
+    if writer is not None:
+        writer.release()
 
     with open(OUT_CSV, "w", newline="") as f:
         wcsv = csv.writer(f)
@@ -3960,13 +6204,19 @@ def render_pass(n, A, status):
         wcsv.writerows(rows)
     print(f"wrote {OUT_CSV} ({len(rows)} rows)")
 
-    # verify playback
-    chk = cv2.VideoCapture(out_path)
-    nchk = int(chk.get(cv2.CAP_PROP_FRAME_COUNT))
-    ok1, _ = chk.read()
-    chk.set(cv2.CAP_PROP_POS_FRAMES, nchk - 1)
-    ok2, _ = chk.read()
-    print(f"playback check: frames={nchk} first={ok1} last={ok2}")
+    with open(OUT_BOXES, "w", newline="") as f:
+        wcsv = csv.writer(f)
+        wcsv.writerow(["frame", "id", "team", "x", "y", "w", "h", "conf"])
+        wcsv.writerows(box_rows)
+    print(f"wrote {OUT_BOXES} ({len(box_rows)} rows)")
+
+    if writer is not None:
+        chk = cv2.VideoCapture(out_path)
+        nchk = int(chk.get(cv2.CAP_PROP_FRAME_COUNT))
+        ok1, _ = chk.read()
+        chk.set(cv2.CAP_PROP_POS_FRAMES, nchk - 1)
+        ok2, _ = chk.read()
+        print(f"playback check: frames={nchk} first={ok1} last={ok2}")
 
 
 if __name__ == "__main__":
@@ -3987,17 +6237,49 @@ if __name__ == "__main__":
         "--team-calibration",
         help=("JSON report created by src.classify_teams; enables team names "
               "and jersey-classification confidence in the video and CSV."))
+    parser.add_argument(
+        "--team-names",
+        default=None,
+        help=("Display names for the two tracker teams when colors are "
+              "calibrated automatically from --player-boxes. The first name "
+              "maps to the alphabetically first team label in that CSV, and "
+              "the second name maps to the other label. Example: Blue,Red. "
+              "The default is each tracker label with a capital first letter."))
+    parser.add_argument("--no-video", action="store_true",
+                        help="Skip writing tracked_players.mp4.")
+    parser.add_argument(
+        "--player-boxes",
+        default=None,
+        help=("CSV of frame,id,team,x,y,w,h,conf. Skips player detection "
+              "and uses these boxes. Field tracking is unchanged."),
+    )
+    parser.add_argument("--stop-at", type=int, default=None, metavar="N",
+                        help="Process only frames 0..N-1. Frame 0 stays the roster frame.")
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     CLIP = args.video
     OUT_VIDEO = os.path.join(args.out_dir, "tracked_players.mp4")
     OUT_CSV = os.path.join(args.out_dir, "positions.csv")
+    OUT_BOXES = os.path.join(args.out_dir, "boxes.csv")
     HOMOGRAPHY_CACHE = os.path.join(args.out_dir, "homography.npz")
     SAMPLE_DIR = os.path.join(args.out_dir, "frames")
     os.makedirs(SAMPLE_DIR, exist_ok=True)
     REF_ANCHOR = args.anchor
     FIELD_MAP = args.field_map
+    WRITE_VIDEO = not args.no_video
+    STOP_AT = args.stop_at
+    PLAYER_BOXES = args.player_boxes
     if args.team_calibration:
         TEAM_PROTOTYPES = load_calibration_report(args.team_calibration)
         print(f"loaded team calibration from {args.team_calibration}")
+    elif args.player_boxes:
+        built = _auto_team_prototypes(
+            args.video, args.player_boxes, args.team_names)
+        if built is not None:
+            TEAM_PROTOTYPES, report = built
+            report_path = os.path.join(args.out_dir, "team_classification.json")
+            with open(report_path, "w", encoding="utf-8") as handle:
+                json.dump(report, handle, indent=2)
+                handle.write("\n")
+            print(f"wrote {report_path}")
     main()

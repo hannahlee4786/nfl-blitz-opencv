@@ -52,21 +52,38 @@ This command tracks the field from the opening frame, then keeps a number on eac
 python pipeline/track_clip4.py --video data/input/gameplay3.mp4 --out-dir data/output
 ```
 
-To add the real team name and jersey-classification confidence to every
-tracked player, pass the JSON calibration created by `src.classify_teams`:
+When you pass `--player-boxes`, the run builds team colors itself. It samples
+upper-torso crops from large, confident boxes that do not overlap another box,
+measures a jersey color for each tracker team, and writes
+`<out-dir>/team_classification.json`. The team name on every box is the tracker team's display name. `team_conf` is the share of that track's confident colour frames that agree with this name, and it is 0 when the track has none. Display names default to the tracker
+labels with a capital first letter, such as Red and Blue. `--team-names`
+overrides those names in alphabetical order of the tracker team column, so
+`--team-names Blue,Red` names the `blue` rows Blue and the `red` rows Red.
+
+```bash
+bash ml/run_pipeline.sh clip4 data/output/clip4
+```
+
+`ml/run_pipeline.sh` accepts `clip4`, `clip64`, or a video path, then an
+output directory, then any extra `track_clip4.py` arguments. It writes
+`player_boxes.csv`, projects those boxes, and fills team names. The default
+anchor is `-15`. The script exits non-zero when the field fit prints a line
+that starts with `FATAL`.
+
+A label such as `4 Red 97% | trk 82%` shows the player ID, team name, team
+confidence, and the separate tracking confidence.
+
+`src.classify_teams` still writes a manual calibration when you want to drag
+jersey patches yourself. Pass that file with `--team-calibration` and the
+automatic colors are left unused:
 
 ```bash
 python pipeline/track_clip4.py \
   --video data/input/gameplay3.mp4 \
   --out-dir data/output \
+  --player-boxes data/output/player_boxes.csv \
   --team-calibration data/output/team_classification.json
 ```
-
-The video pipeline does not ask you to select player regions. It uses the
-boxes found by the automatic tracker, takes the upper-torso area of each box,
-and runs the saved team-color classifier on that area for every frame. A label
-such as `4 Tampa 97% | trk 82%` shows the player ID, team classification,
-team confidence, and the separate tracking confidence.
 
 `--anchor` is the yard offset on the reference frame. The default is `-15`, which places the line of scrimmage at the 50 for the clip this pipeline was built on. If your opening frame is a different yard line, set `--anchor` so the reported `x_yd` matches the painted number.
 

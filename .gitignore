@@ -9,3 +9,5 @@ data/input/*
 !data/input/.gitkeep
 data/output/*
 !data/output/.gitkeep
+data/drive-download-*/
+data/labels/*.draft.json
