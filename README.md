@@ -2,49 +2,70 @@
 
 ## Quickstart
 
-Clone the repository, then run setup from the repository root. `./setup.sh` creates `.venv` on Python 3.12, installs the pinned packages in `requirements.txt`, and downloads `models/yolo11m.pt`.
+Clone the `opencv-pipeline` branch, then run setup from the repository root. `./setup.sh` creates `.venv` on Python 3.12, installs the pinned packages in `requirements.txt`, and downloads `models/yolo11m.pt`.
 
 ```bash
-git clone <this-repo> nfl-blitz-opencv-pipeline
-cd nfl-blitz-opencv-pipeline
+git clone -b opencv-pipeline git@github.com:hannahlee4786/nfl-blitz-opencv.git
+cd nfl-blitz-opencv
 ./setup.sh
 ```
 
-Put the labeled videos in `data/input/`:
+Run every later command from the repository root.
+
+### Your video
+
+Put a gameplay clip in `data/input/` and pass that path to the pipeline. Quote the path if the file name has spaces.
+
+```bash
+# drop your file here, then change the two paths
+bash ml/run_pipeline.sh "data/input/YOUR_CLIP.mp4" data/output/myclip
+```
+
+The tracked video is `data/output/myclip/tracked_players.mp4`. Boxes and field positions are `boxes.csv` and `positions.csv` in the same folder.
+
+Optional flags after the output directory:
+
+```bash
+bash ml/run_pipeline.sh "data/input/YOUR_CLIP.mp4" data/output/myclip \
+  --team-names Dallas,Tampa \
+  --anchor -15
+```
+
+`--team-names` is blue team first, then red. Without it the labels read Blue and Red. `--anchor` is the yard offset on the opening frame so `x_yd` matches the painted number. The default is `-15`.
+
+The opening frame has to show yard lines the field fitter can lock onto. A clip that opens on the end-zone camera prints `FATAL: no fresh fit at reference frame` and the script exits 1.
+
+### Labeled clips
+
+These two files are the scored examples. Put them in `data/input/` if you have them:
 
 ```text
 data/input/Clip_4 Camera Swing and Distance Change Test.mp4
 data/input/Clip 64.mov
 ```
 
-Run Clip 4 and score the boxes:
-
 ```bash
 bash ml/run_pipeline.sh clip4 data/output/clip4
 .venv/bin/python tools/eval_tracking.py --labels data/labels/clip4.json --boxes data/output/clip4/boxes.csv
+
+bash ml/run_pipeline.sh clip64 data/output/clip64
+.venv/bin/python tools/eval_tracking.py --labels data/labels/clip64.json --boxes data/output/clip64/boxes.csv
 ```
 
-This branch reads a gameplay video and estimates where the camera is on the field, then where each player is standing. Game files, footage, and extracted textures stay outside the repository. You supply the video locally.
-
-Run every command from the repository root.
+Game files, footage, and extracted textures stay outside the repository. You supply the video locally.
 
 ## Setup
 
 `./setup.sh` is the install path. It uses `uv` when that command is on `PATH`, and `python3.12 -m venv` otherwise. Running it again reinstalls the same pins and skips the YOLO download when the file hash already matches.
 
-Put the video here:
-
-```text
-data/input/gameplay3.mp4
-```
-
 ## Field and camera tracker
+
 Three commands. The first draws the detected field lines. The second asks you to click six landmarks so the field has a coordinate system. The third follows those landmarks through the clip and redraws the grid.
 
 ```bash
-python -m src.main
-python -m src.initialize_homography
-python -m src.track_video
+.venv/bin/python -m src.main
+.venv/bin/python -m src.initialize_homography
+.venv/bin/python -m src.track_video
 ```
 
 Click the points in this order. Each pair is one yard line crossing the two hash rows.
@@ -60,57 +81,29 @@ Point 6: 40-yard line, right hash
 
 Left click selects a point. `U` undoes the last point. `R` clears them. Enter computes the homography. Escape cancels.
 
-The initializer writes `data/output/initial_homography.npz` and `data/output/initial_homography_preview.png`. The purple grid should sit on the yard lines before you continue. `python -m src.track_video` then writes `data/output/tracked_field.mp4`. It keeps a landmark only when optical flow can track it forward and back to the same pixel, and it refits the homography from the landmarks that remain.
+The initializer writes `data/output/initial_homography.npz` and `data/output/initial_homography_preview.png`. The purple grid should sit on the yard lines before you continue. `.venv/bin/python -m src.track_video` then writes `data/output/tracked_field.mp4`. It keeps a landmark only when optical flow can track it forward and back to the same pixel, and it refits the homography from the landmarks that remain.
 
 ## Player tracker
-This command tracks the field from the opening frame, then keeps a number on each player for the rest of the clip. The opening roster is seven red and seven blue. A number stays with that player, and the box remains while their feet are still in the picture.
+
+`ml/run_pipeline.sh` detects players, keeps an id on each person, projects the boxes onto the field, and fills team names. It accepts `clip4`, `clip64`, or a video path, then an output directory, then any extra `pipeline/track_clip4.py` arguments. The default anchor is `-15`. The script exits non-zero when the field fit prints a line that starts with `FATAL`.
+
+When you pass `--player-boxes`, the run builds team colors itself. It samples upper-torso crops from large, confident boxes that do not overlap another box, measures a jersey color for each tracker team, and writes `<out-dir>/team_classification.json`. The team name on every box is the tracker team's display name. `team_conf` is the share of that track's confident colour frames that agree with this name, and it is 0 when the track has none.
+
+A label such as `4 Red 97% | trk 82%` shows the player ID, team name, team confidence, and the separate tracking confidence.
+
+`src.classify_teams` still writes a manual calibration when you want to drag jersey patches yourself. Pass that file with `--team-calibration` and the automatic colors are left unused:
 
 ```bash
-python pipeline/track_clip4.py --video data/input/gameplay3.mp4 --out-dir data/output
-```
-
-When you pass `--player-boxes`, the run builds team colors itself. It samples
-upper-torso crops from large, confident boxes that do not overlap another box,
-measures a jersey color for each tracker team, and writes
-`<out-dir>/team_classification.json`. The team name on every box is the tracker team's display name. `team_conf` is the share of that track's confident colour frames that agree with this name, and it is 0 when the track has none. Display names default to the tracker
-labels with a capital first letter, such as Red and Blue. `--team-names`
-overrides those names in alphabetical order of the tracker team column, so
-`--team-names Blue,Red` names the `blue` rows Blue and the `red` rows Red.
-
-```bash
-bash ml/run_pipeline.sh clip4 data/output/clip4
-```
-
-`ml/run_pipeline.sh` accepts `clip4`, `clip64`, or a video path, then an
-output directory, then any extra `track_clip4.py` arguments. It writes
-`player_boxes.csv`, projects those boxes, and fills team names. The default
-anchor is `-15`. The script exits non-zero when the field fit prints a line
-that starts with `FATAL`.
-
-A label such as `4 Red 97% | trk 82%` shows the player ID, team name, team
-confidence, and the separate tracking confidence.
-
-`src.classify_teams` still writes a manual calibration when you want to drag
-jersey patches yourself. Pass that file with `--team-calibration` and the
-automatic colors are left unused:
-
-```bash
-python pipeline/track_clip4.py \
-  --video data/input/gameplay3.mp4 \
-  --out-dir data/output \
-  --player-boxes data/output/player_boxes.csv \
-  --team-calibration data/output/team_classification.json
-```
-
-`--anchor` is the yard offset on the reference frame. The default is `-15`, which places the line of scrimmage at the 50 for the clip this pipeline was built on. If your opening frame is a different yard line, set `--anchor` so the reported `x_yd` matches the painted number.
-
-```bash
-python pipeline/track_clip4.py --video data/input/gameplay3.mp4 --out-dir data/output --anchor -15
+.venv/bin/python pipeline/track_clip4.py \
+  --video "data/input/YOUR_CLIP.mp4" \
+  --out-dir data/output/myclip \
+  --player-boxes data/output/myclip/player_boxes.csv \
+  --team-calibration data/output/myclip/team_classification.json
 ```
 
 `--field-map` is optional. Pass a top-down field image and the video gains a map panel beside the clip. Without it, the output is the annotated clip only.
 
-The run writes three things into `--out-dir`:
+The run writes these files into `--out-dir`:
 
 | File | Contents |
 |---|---|
@@ -119,9 +112,4 @@ The run writes three things into `--out-dir`:
 | `homography.npz` | Field homography for each frame, reused on the next run |
 | `frames/` | Still frames from the video |
 
-`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera.
-`track_conf` is high when the detection agrees with the position predicted
-from nearby frames. `team_conf` is the agreement among jersey-color pixels,
-and `color_coverage` is the share of usable colorful pixels matching either
-team. The first run fits the field, and a later run on the same video reuses
-`homography.npz`.
+`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera. `track_conf` is high when the detection agrees with the position predicted from nearby frames. `team_conf` is the agreement among jersey-color pixels, and `color_coverage` is the share of usable colorful pixels matching either team. The first run fits the field, and a later run on the same video reuses `homography.npz`.
