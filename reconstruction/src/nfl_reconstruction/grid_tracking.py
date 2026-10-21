@@ -21,6 +21,8 @@ from .line_score import (
     find_painted_lines,
     get_tracking_status,
     measure_line_error,
+    measure_line_fit,
+    project_field_points,
 )
 from .line_snapping import snap_to_lines
 from .point_tracking import match_frame_motion, track_screen_points
@@ -41,6 +43,57 @@ FEATURE_SPACING = 12
 # it before RANSAC treats it as an outlier.
 RANSAC_THRESHOLD = 3.0
 
+# After a turnover the camera swings around behind the new offense in a
+# few frames, too fast for points or matched features to follow. To find
+# the grid again, circle the last good camera around spots this far down
+# the middle of the picture (as a fraction of its height), where the play
+# usually is.
+SWING_PIVOT_HEIGHTS = (0.5, 0.6, 0.7, 0.8, 0.9)
+SWING_ANGLES = np.arange(-180.0, 180.0, 5.0)
+
+# A grid turned 180 degrees fits the yard lines as well as the right one,
+# so the turn must be pinned down some other way. Until the swing's
+# direction is known, allow up to this many degrees either way: the first
+# frame of a swing turns less than that.
+SWING_FIRST_TURN = 90.0
+
+# A turn bigger than this sets which way the camera is swinging. After
+# that, allow turns up to 180 degrees that way but only this many back:
+# on Clip 14 the 180-degree twin of the right grid turned the other way.
+SWING_MIN_TURN = 10.0
+SWING_BACKTRACK = 20.0
+
+# Forget the direction after this many frames tracked without a search.
+SWING_SETTLE_FRAMES = 15
+
+# Then refine the best turns in steps this fine, so the snap starts close
+# enough not to slide the grid along the yard lines.
+SWING_FINE_ANGLES = np.arange(-4.0, 4.1, 1.0)
+
+# How many of the best-scoring turns to try snapping.
+SWING_SNAP_TRIES = 8
+
+# Yard lines repeat every 5 yards and say nothing about where along them
+# the grid sits, so several turns snap onto them equally well. Pick the
+# one that best lines up the paint of the last good frame with this one:
+# the numbers, hash marks, and sidelines then land where they should. The
+# grass is no help; its texture looks different from every angle. Sample
+# every this many pixels, blurred by this much so near misses still count.
+SWING_MATCH_STEP = 4
+SWING_MATCH_BLUR = 3.0
+
+# Accept a found grid only when this many samples overlap and its match
+# (see match_views) is at least this. Mid-swing on Clip 14 the right grids
+# score only 0.11 to 0.32, the view changes so much; the swing's direction,
+# not this, is what rules out the wrong ones.
+SWING_MIN_MATCH_SAMPLES = 500
+SWING_MIN_MATCH = 0.1
+
+# Search when fewer than this fraction of the tracked points could be
+# followed into the next frame. Then even a grid that snaps cleanly may be
+# 5 yards off, so the search's grids compete with it.
+SWING_POINTS_KEPT = 0.5
+
 
 @dataclass(frozen=True)
 class PaintedLines:
@@ -49,6 +102,15 @@ class PaintedLines:
     field_mask: NDArray[np.uint8]
     painted: NDArray[np.uint8]
     distance_map: NDArray[np.float32]
+
+
+@dataclass(frozen=True)
+class GoodView:
+    """The last frame whose grid sat on the painted lines."""
+
+    homography: NDArray[np.float64]
+    blurred: NDArray[np.float32]
+    field_mask: NDArray[np.uint8]
 
 
 @dataclass(frozen=True)
@@ -146,6 +208,275 @@ def detect_new_points(
     return screen_points, screen_to_field(screen_points, homography)
 
 
+def turn_about(
+    homography: NDArray[np.float64],
+    pivot: NDArray[np.float64],
+    degrees: float,
+) -> NDArray[np.float64]:
+    """
+    Return the homography of the camera circled `degrees` around the
+    field point `pivot`, keeping its height and tilt.
+    """
+
+    # Circling the camera one way shows what turning the field the other
+    # way about the same point would.
+    angle = np.radians(-degrees)
+    cosine, sine = np.cos(angle), np.sin(angle)
+    rotation = np.array(((cosine, -sine), (sine, cosine)))
+    shift = pivot - rotation @ pivot
+
+    field_turn = np.array(
+        (
+            (cosine, -sine, shift[0]),
+            (sine, cosine, shift[1]),
+            (0.0, 0.0, 1.0),
+        )
+    )
+
+    return homography @ field_turn
+
+
+def blur_for_matching(painted: NDArray[np.uint8]) -> NDArray[np.float32]:
+    return cv2.GaussianBlur(painted.astype(np.float32), (0, 0), SWING_MATCH_BLUR)
+
+
+def match_views(
+    earlier: GoodView,
+    blurred: NDArray[np.float32],
+    field_mask: NDArray[np.uint8],
+    homography: NDArray[np.float64],
+) -> float:
+    """
+    Return how much of this frame's field the earlier frame explains: how
+    well its paint, carried over through the two grids, correlates with
+    this frame's on the field both show, times the share of this frame's
+    field that is. A wrong grid can correlate well on a small patch, but
+    the camera circles the play, so the right one keeps most of the field
+    in view. Return NaN when they share too little of it.
+    """
+
+    step = SWING_MATCH_STEP
+    rows, columns = np.nonzero(field_mask[::step, ::step])
+    rows, columns = rows * step, columns * step
+
+    field_points = screen_to_field(
+        np.column_stack([columns, rows]).astype(np.float32),
+        homography,
+    )
+    earlier_points, in_front = project_field_points(
+        earlier.homography,
+        field_points.astype(np.float64),
+        earlier.field_mask.shape,
+    )
+
+    height, width = earlier.field_mask.shape[:2]
+
+    with np.errstate(invalid="ignore"):
+        earlier_columns = np.round(earlier_points[:, 0])
+        earlier_rows = np.round(earlier_points[:, 1])
+
+        shared = (
+            in_front
+            & (earlier_columns >= 0)
+            & (earlier_columns < width)
+            & (earlier_rows >= 0)
+            & (earlier_rows < height)
+        )
+
+    earlier_columns = earlier_columns[shared].astype(int)
+    earlier_rows = earlier_rows[shared].astype(int)
+    on_field = earlier.field_mask[earlier_rows, earlier_columns] > 0
+
+    if on_field.sum() < SWING_MIN_MATCH_SAMPLES:
+        return float("nan")
+
+    then = earlier.blurred[earlier_rows[on_field], earlier_columns[on_field]]
+    now = blurred[rows[shared][on_field], columns[shared][on_field]]
+
+    then = then - then.mean()
+    now = now - now.mean()
+    spread = np.sqrt((then @ then) * (now @ now))
+
+    if spread == 0:
+        return float("nan")
+
+    shared_fraction = on_field.sum() / len(rows)
+
+    return float((then @ now) / spread * shared_fraction)
+
+
+def fits_last_good(
+    homography: NDArray[np.float64] | None,
+    earlier: GoodView,
+    blurred: NDArray[np.float32],
+    lines: PaintedLines,
+) -> bool:
+    """
+    Return whether a snapped grid both sits on the painted lines and lines
+    up the last good frame with this one. A fast move can leave the
+    tracked points with a wrong guess that still snaps onto lines 5 yards
+    away; only the picture shows it.
+    """
+
+    if homography is None:
+        return False
+
+    error = measure_line_error(lines.distance_map, lines.field_mask, homography)
+
+    if get_tracking_status(error) == "LOST":
+        return False
+
+    match = match_views(earlier, blurred, lines.field_mask, homography)
+
+    # Too little field shared with the last good frame to judge; trust
+    # the lines.
+    return np.isnan(match) or match >= SWING_MIN_MATCH
+
+
+def view_heading(
+    homography: NDArray[np.float64],
+    frame_shape: tuple[int, ...],
+) -> float:
+    """
+    Return which way, in degrees on the field map, the camera looks: from
+    the field under the bottom of the picture's middle toward the field
+    under its center.
+    """
+
+    height, width = frame_shape[:2]
+    near, far = screen_to_field(
+        np.array(((width / 2, 0.9 * height), (width / 2, 0.5 * height)), dtype=np.float32),
+        homography,
+    ).astype(np.float64)
+    along = far - near
+
+    return float(np.degrees(np.arctan2(along[1], along[0])))
+
+
+def turn_between(
+    earlier: NDArray[np.float64],
+    later: NDArray[np.float64],
+    frame_shape: tuple[int, ...],
+) -> float:
+    """Return how many degrees the camera turned, from -180 to 180."""
+
+    turn = view_heading(later, frame_shape) - view_heading(earlier, frame_shape)
+
+    return float((turn + 180.0) % 360.0 - 180.0)
+
+
+def turn_allowed(turn: float, direction: int) -> bool:
+    """Whether a turn fits a swing going `direction` (0 when not known)."""
+
+    if not np.isfinite(turn):
+        return False
+
+    if direction == 0:
+        return abs(turn) <= SWING_FIRST_TURN
+
+    return -SWING_BACKTRACK <= direction * turn
+
+
+def find_swung_grid(
+    earlier: GoodView,
+    blurred: NDArray[np.float32],
+    lines: PaintedLines,
+    tracked: NDArray[np.float64] | None = None,
+    direction: int = 0,
+) -> tuple[NDArray[np.float64], float] | None:
+    """
+    Look for the grid after a fast camera swing, starting from the last
+    good frame, and return it with how far the camera turned. The
+    `tracked` grid, already snapped, competes with the turns found.
+    Return None when no grid sits on the painted lines, turns the way the
+    camera is swinging, and lines up that frame with this one.
+    """
+
+    height, width = lines.field_mask.shape[:2]
+    shape = lines.field_mask.shape
+    spots = np.array(
+        [(width / 2, fraction * height) for fraction in SWING_PIVOT_HEIGHTS],
+        dtype=np.float32,
+    )
+    pivots = screen_to_field(spots, earlier.homography).astype(np.float64)
+
+    def score(pivot, degrees):
+        candidate = turn_about(earlier.homography, pivot, degrees)
+        fit = measure_line_fit(lines.distance_map, lines.field_mask, candidate)
+        return fit, candidate
+
+    coarse = []
+
+    for pivot in pivots:
+        if not np.isfinite(pivot).all():
+            continue
+
+        fits = []
+
+        for degrees in SWING_ANGLES:
+            fit, candidate = score(pivot, degrees)
+            turn = turn_between(earlier.homography, candidate, shape)
+            fits.append(fit if turn_allowed(turn, direction) else np.nan)
+
+        fits = np.array(fits)
+        padded = np.concatenate([[np.inf], np.nan_to_num(fits, nan=np.inf), [np.inf]])
+
+        # Keep only the best angle of each dip, so one pivot's neighboring
+        # angles do not crowd out the others.
+        for position, degrees in enumerate(SWING_ANGLES):
+            fit = padded[position + 1]
+
+            if np.isfinite(fit) and fit <= padded[position] and fit <= padded[position + 2]:
+                coarse.append((fit, pivot, degrees))
+
+    coarse.sort(key=lambda item: item[0])
+
+    refined = []
+
+    for _, pivot, degrees in coarse[:SWING_SNAP_TRIES]:
+        fits = [score(pivot, degrees + step) for step in SWING_FINE_ANGLES]
+        fits = [item for item in fits if not np.isnan(item[0])]
+        refined.append(min(fits, key=lambda item: item[0]))
+
+    snapped_candidates = [
+        snap_to_lines(
+            candidate,
+            lines.painted,
+            lines.distance_map,
+            lines.field_mask,
+        )
+        for _, candidate in refined
+    ]
+
+    best = None
+    best_match = SWING_MIN_MATCH
+
+    for snapped in [tracked, *snapped_candidates]:
+        if snapped is None:
+            continue
+
+        turn = turn_between(earlier.homography, snapped, shape)
+
+        if not turn_allowed(turn, direction):
+            continue
+
+        error = measure_line_error(
+            lines.distance_map,
+            lines.field_mask,
+            snapped,
+        )
+
+        if get_tracking_status(error) != "GOOD":
+            continue
+
+        match = match_views(earlier, blurred, lines.field_mask, snapped)
+
+        if match > best_match:
+            best, best_match = (snapped, turn), match
+
+    return best
+
+
 def follow_grid(
     frames: Sequence[NDArray[np.uint8]],
     excluded: NDArray[np.bool_],
@@ -180,6 +511,17 @@ def follow_grid(
     if snapped[0]:
         current_homography = snapped_homography
 
+    # Where to search from if the camera swings out of reach.
+    last_good = GoodView(
+        current_homography,
+        blur_for_matching(lines.painted),
+        lines.field_mask,
+    )
+
+    # Which way the camera is swinging (-1 or 1), 0 when not swinging.
+    swing_direction = 0
+    frames_since_search = 0
+
     screen_points, field_points = detect_new_points(
         previous_gray,
         create_feature_mask(lines.field_mask, []),
@@ -203,6 +545,7 @@ def follow_grid(
         lines = find_frame_lines(frames[index], excluded)
 
         valid_count = 0
+        points_before = len(screen_points)
 
         if len(screen_points) > 0:
             (
@@ -276,6 +619,44 @@ def follow_grid(
                     lines.field_mask,
                 )
 
+        current_blurred = blur_for_matching(lines.painted)
+
+        lost_most_points = valid_count < SWING_POINTS_KEPT * points_before
+
+        if lost_most_points or not fits_last_good(
+            snapped_homography,
+            last_good,
+            current_blurred,
+            lines,
+        ):
+            # Too fast for the tracked points, as in the swing after a
+            # turnover: search for the grid by turning the last good one,
+            # and keep whichever grid lines up the pictures best.
+            swung = find_swung_grid(
+                last_good,
+                current_blurred,
+                lines,
+                snapped_homography,
+                swing_direction,
+            )
+            frames_since_search = 0
+
+            # Outside a swing, leave small corrections to the tracked
+            # points: the search knows nothing about where along the yard
+            # lines the grid sits, and can slide it.
+            if swung is not None and (
+                swing_direction != 0 or abs(swung[1]) > SWING_MIN_TURN
+            ):
+                snapped_homography, turn = swung
+
+                if abs(turn) > SWING_MIN_TURN:
+                    swing_direction = 1 if turn > 0 else -1
+        else:
+            frames_since_search += 1
+
+            if frames_since_search >= SWING_SETTLE_FRAMES:
+                swing_direction = 0
+
         snapped[index] = snapped_homography is not None
 
         if snapped[index]:
@@ -314,6 +695,13 @@ def follow_grid(
             current_homography,
         )
         statuses[index] = get_tracking_status(line_errors[index])
+
+        if statuses[index] == "GOOD":
+            last_good = GoodView(
+                current_homography,
+                current_blurred,
+                lines.field_mask,
+            )
 
         previous_gray = current_gray
 

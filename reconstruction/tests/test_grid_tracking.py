@@ -88,3 +88,56 @@ def test_line_errors_score_each_camera_on_every_frame():
     assert (errors[0] < 1.5).all()
     assert math.isnan(errors[1, 0])
     assert errors[1, 1] >= 4.0
+
+
+def swing_clip(pans):
+    """A camera circling the spot it looks at, like the swing after a
+    turnover that brings it behind the new offense."""
+
+    height, tilt = 15.7, 27.0
+    reach = height / math.tan(math.radians(tilt))
+    target = (52.0, 26.67)
+    truths = [
+        blitz_homography(
+            (
+                target[0] - reach * math.cos(math.radians(pan)),
+                target[1] - reach * math.sin(math.radians(pan)),
+                height,
+                pan,
+                tilt,
+                0.0,
+            )
+        )
+        for pan in pans
+    ]
+    return truths, [render_field(truth, numbers=True) for truth in truths]
+
+
+def test_tracking_finds_the_grid_again_after_a_fast_swing():
+    # Clip 14 swings about 180 degrees in five frames after an
+    # interception, too fast for the tracked points to follow.
+    truths, frames = swing_clip([180, 180, 180, 143, 106, 69, 32, 0, 0, 0])
+
+    grid = track_grid(frames, NOTHING_EXCLUDED, 0, truths[0])
+
+    assert grid.statuses.tolist() == ["GOOD"] * 10
+    for truth, homography in zip(truths, grid.homographies):
+        assert np.median(across_line_errors(truth, homography)) < 0.1
+        assert np.median(screen_gaps(truth, homography)) < 2.0
+
+
+def test_tracking_keeps_turning_the_same_way_through_unreadable_frames():
+    # On Clip 14 two frames mid-swing could not be read, and the next
+    # readable one had turned more than 90 degrees. The grid turned 180
+    # degrees from the right one fits the yard lines as well, but turns
+    # back against the swing.
+    truths, frames = swing_clip([180, 180, 180, 143, 106, 69, 32, 0, 0, 0])
+    unreadable = np.full((FRAME_SIZE[1], FRAME_SIZE[0], 3), STANDS, dtype=np.uint8)
+    frames[4] = frames[5] = unreadable
+
+    grid = track_grid(frames, NOTHING_EXCLUDED, 0, truths[0])
+
+    assert grid.statuses[[4, 5]].tolist() == ["LOST", "LOST"]
+    for index in [6, 7, 8, 9]:
+        assert grid.statuses[index] == "GOOD"
+        assert np.median(screen_gaps(truths[index], grid.homographies[index])) < 2.0

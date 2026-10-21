@@ -5,6 +5,7 @@ from nfl_reconstruction.camera_model import (
     parameters_to_pose,
     pose_homography,
 )
+from nfl_reconstruction.field import LOWER_NUMBER_Y, UPPER_NUMBER_Y
 from nfl_reconstruction.line_score import LINE_SAMPLES, project_field_points
 from nfl_reconstruction.schemas import CameraState
 
@@ -85,9 +86,11 @@ def _repeatable_fraction(first, second):
     return value - np.floor(value)
 
 
-def render_field(homography, frame_size=FRAME_SIZE, line_width=0.3):
+def render_field(homography, frame_size=FRAME_SIZE, line_width=0.3, numbers=False):
     """Draw speckled grass with painted 5-yard lines and sidelines, seen
-    through the homography, as an RGB frame."""
+    through the homography, as an RGB frame. With `numbers`, also paint a
+    stand-in for each yard number: a bar beside the line, longer the
+    farther it is from the nearer goal line, so no two look alike."""
 
     width, height = frame_size
     rows, columns = np.indices((height, width))
@@ -119,9 +122,20 @@ def render_field(homography, frame_size=FRAME_SIZE, line_width=0.3):
         speck_y = cell_y + 0.2 + 0.6 * _repeatable_fraction(cell_y, cell_x)
         on_speck = (x - speck_x) ** 2 + (y - speck_y) ** 2 < SPECK_RADIUS**2
 
+    on_number = np.zeros(width * height, dtype=bool)
+
+    if numbers:
+        with np.errstate(invalid="ignore"):
+            ten = 10 + 10 * np.round((x - 10) / 10)
+            blocks = np.minimum(ten - 10, 110 - ten) / 10
+            beside = np.abs(x - (ten - 1.5)) < 0.5
+
+            for row in (UPPER_NUMBER_Y, LOWER_NUMBER_Y):
+                on_number |= beside & (np.abs(y - row) < 0.5 + 0.4 * blocks)
+
     frame = np.empty((width * height, 3), dtype=np.uint8)
     frame[:] = STANDS
     frame[on_field] = GRASS
     frame[on_field & on_speck] = DARK_GRASS
-    frame[on_field & (on_yard_line | on_sideline)] = PAINT
+    frame[on_field & (on_yard_line | on_sideline | on_number)] = PAINT
     return frame.reshape(height, width, 3)

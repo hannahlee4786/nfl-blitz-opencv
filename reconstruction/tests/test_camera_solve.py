@@ -8,6 +8,7 @@ from nfl_reconstruction.camera_solve import (
     export_pose_json,
     find_sources,
     pose_to_state,
+    smooth_parameters,
     solve_camera,
 )
 from tests.fixtures import BLITZ_PARAMETERS, FOCAL, FRAME_SIZE, blitz_homography
@@ -75,6 +76,35 @@ def test_solver_fills_lost_frames_from_their_neighbors():
     assert solution.sources[10:15].tolist() == ["filled"] * 5
     assert all(solution.raw_homographies[frame] is None for frame in range(10, 15))
     assert np.allclose(solution.parameters[10:15, :3], truth[10:15, :3], atol=0.05)
+
+
+def test_solver_coasts_then_holds_the_camera_when_the_clip_ends_lost():
+    truth, homographies = camera_path(40)
+    statuses = ["GOOD"] * 40
+    for frame in range(20, 40):
+        statuses[frame] = "LOST"
+        homographies[frame] = np.eye(3)
+
+    solution = solve_camera(homographies, statuses, [True] * 40, FRAME_SIZE, WHOLE_PICTURE)
+
+    # The camera moves steadily, so coasting follows it for a while.
+    assert np.allclose(solution.parameters[20:30, :3], truth[20:30, :3], atol=0.05)
+    assert np.allclose(solution.parameters[30:], solution.parameters[29])
+
+
+def test_smoothing_never_coasts_the_camera_under_the_field():
+    # Clip 13 ends on a sideline close-up with no grid while the camera
+    # comes down fast. Carrying that on put it under the field.
+    count = 20
+    parameters = np.array(
+        [(50.0, 26.0, 10.0 - 1.5 * frame, 0.0, 27.0, 0.0) for frame in range(count)]
+    )
+    sources = np.array(["snapped"] * 6 + ["filled"] * (count - 6))
+
+    smoothed = smooth_parameters(parameters, sources)
+
+    assert (smoothed[:, 2] > 0).all()
+    assert np.allclose(smoothed[-1], smoothed[-2])
 
 
 def test_solver_lets_the_focal_length_change_when_the_lens_zooms():

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from fractions import Fraction
+import hashlib
 import json
+import os
 import math
 from pathlib import Path
 import tempfile
@@ -13,6 +15,14 @@ from PIL import Image
 import typer
 
 from .annotations import anchor_homography, load_anchor
+from .calibration import (
+    anchor_field_points,
+    browse_frames,
+    build_anchor,
+    click_image_points,
+    read_frame,
+    yard_number_labels,
+)
 from .camera_solve import (
     describe_solution,
     export_pose_json,
@@ -46,6 +56,17 @@ app = typer.Typer(help="Reconstruct a static NFL field from a moving-camera clip
 # How far later stages may trust a camera, by its line-error rating. LOST
 # frames fall below every camera confidence threshold.
 LINE_CONFIDENCE = {"GOOD": 1.0, "FAIR": 0.5, "LOST": 0.0}
+
+# Where `clip` keeps the anchors, configs, and runs it creates.
+RECONSTRUCTION_ROOT = Path(__file__).resolve().parents[2]
+
+# Score, clock, and play-call graphics, as fractions of the game picture.
+# They sit in the same places in every current clip.
+DEFAULT_HUD_RECTANGLES = [
+    [0.0, 0.0, 0.2, 0.18],
+    [0.4, 0.0, 0.88, 0.27],
+    [0.0, 0.78, 1.0, 1.0],
+]
 
 
 def _parse_frame_range(value: str | None, default: str) -> range:
@@ -325,6 +346,8 @@ def _execute(
         "run_id": payload.get("run_id", f"{source.stem}-{selected.start}-{selected.stop}"),
         "input": str(source),
         "anchor": str(anchor),
+        # Re-clicking an anchor in place must rerun the camera stage.
+        "anchor_sha256": hashlib.sha256(anchor.read_bytes()).hexdigest(),
         "video": video.model_dump(),
         "run_dir": str(run_dir.resolve()),
         "frame_range": [selected.start, selected.stop],
@@ -384,6 +407,17 @@ def run_command(
         typer.echo(f"frames={selected.start}:{selected.stop}")
         typer.echo(f"stages={','.join(stage_names)}")
         return
+    _run_and_report(config, run_dir, stage_names, frame_range, input_path, weights)
+
+
+def _run_and_report(
+    config: Path,
+    run_dir: Path,
+    stage_names: list[str],
+    frame_range: str | None,
+    input_path: Path | None,
+    weights: Path | None = None,
+) -> None:
     manifest = _execute(config, run_dir, stage_names, frame_range, input_path, weights)
     for name in stage_names:
         record = manifest.stages[name]
@@ -405,6 +439,95 @@ def run_command(
         temporary = run_dir / ".evaluation.json.tmp"
         temporary.write_text(mosaic_evaluation.read_text())
         temporary.replace(run_dir / "evaluation.json")
+
+
+def _clip_name(video: Path) -> str:
+    """'Clip_5 Goal Line Test.mp4' -> 'clip_5-goal-line-test'."""
+
+    words = "".join(c if c.isalnum() or c == "_" else " " for c in video.stem.lower())
+    return "-".join(words.split())
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+@app.command("clip")
+def clip_command(
+    video: Path = typer.Argument(..., exists=True, dir_okay=False, help="Gameplay video."),
+    name: str | None = typer.Option(None, help="Name for the anchor, config, and run. Defaults to the video name."),
+    frame: int | None = typer.Option(
+        None, help="Frame to click on. Leave it out to pick one in the frame browser."
+    ),
+    yard_lines: str = typer.Option("20,30,40", help="The three painted yard numbers to click, in order."),
+    reclick: bool = typer.Option(False, help="Click a new anchor even if this clip already has one."),
+    stages: str = typer.Option("prepare,camera,mosaic", help="Comma-separated stages to run."),
+    frame_range: str | None = typer.Option(None, help="Half-open frame range START:END."),
+) -> None:
+    """Click a field anchor if needed, write the clip's config, and run it."""
+
+    video = video.resolve()
+    name = name or _clip_name(video)
+    anchor_path = RECONSTRUCTION_ROOT / "annotations" / f"{name}-anchor.json"
+    config_path = RECONSTRUCTION_ROOT / "configs" / f"{name}.json"
+    run_dir = RECONSTRUCTION_ROOT / "runs" / name
+
+    if anchor_path.exists() and not reclick:
+        typer.echo(f"Reusing anchor {anchor_path} (pass --reclick to click again)")
+    else:
+        numbers = [int(value) for value in yard_lines.split(",")]
+        if len(numbers) != 3:
+            raise typer.BadParameter("give three yard numbers, e.g. 20,30,40")
+        labels = yard_number_labels(numbers)
+        if frame is None:
+            typer.echo("Pick a frame where the yard numbers are not covered (A/D, [ / ], Enter).")
+            frame, image = browse_frames(video)
+        else:
+            image, _ = read_frame(video, frame)
+        typer.echo(f"Click these points on frame {frame}, in order:")
+        for index, label in enumerate(labels, start=1):
+            typer.echo(f"  {index}. {label}")
+        clicks = click_image_points(image, labels)
+        field_points = anchor_field_points(numbers, clicks)
+        try:
+            anchor, error = build_anchor(
+                field_points, clicks, frame, (image.shape[1], image.shape[0])
+            )
+        except ValueError as failure:
+            raise typer.BadParameter(str(failure)) from failure
+        _write_json(anchor_path, anchor)
+        typer.echo(
+            f"Saved anchor {anchor_path}: kept {len(anchor['field_points'])}/"
+            f"{len(labels)} clicks, mean error {error:.2f} px"
+        )
+
+    if config_path.exists():
+        typer.echo(f"Reusing config {config_path}")
+    else:
+        anchor_frame = json.loads(anchor_path.read_text())["frame"]
+        _, frame_count = read_frame(video, anchor_frame)
+        _write_json(
+            config_path,
+            {
+                "schema_version": 1,
+                "run_id": name,
+                "input": os.path.relpath(video, config_path.parent),
+                "anchor": os.path.relpath(anchor_path, config_path.parent),
+                "stages": ["prepare", "camera", "mosaic"],
+                "default_frame_range": f"0:{frame_count}",
+                "pixels_per_yard": 4,
+                "camera_confidence_threshold": 0.25,
+                "hud_rectangles": DEFAULT_HUD_RECTANGLES,
+            },
+        )
+        typer.echo(f"Saved config {config_path}")
+
+    stage_names = [stage.strip() for stage in stages.split(",") if stage.strip()]
+    _run_and_report(config_path, run_dir, stage_names, frame_range, None)
+    preview = run_dir / "mosaic" / "reconstruction-preview.mp4"
+    if preview.exists():
+        typer.echo(f"Preview: {preview}")
 
 
 def _single_stage(name: str, config: Path, run_dir: Path, frame_range: str | None):

@@ -8,3 +8,7 @@ dist/
 runs/
 weights/
 
+
+# Anchors and configs written by `nfl-reconstruct clip`. 
+annotations/*-anchor.json
+configs/*.json

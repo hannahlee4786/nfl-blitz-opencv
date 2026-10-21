@@ -36,12 +36,56 @@ JSON. Repeating an identical command reuses completed stages.
 
 `configs/clip1-full.json` to `configs/clip4-full.json` run the four full-size
 clips in `data/input` (Clip 3 is `gameplay3.mp4`), with anchors made from the
-camera-tracking calibration clicks. Clip 1 is calibrated on the far half of the
-field.
+camera-tracking calibration clicks.
+
+## Field coordinates
+
+Coordinates follow the offense, not anything painted on the field. NFL Blitz
+starts every play with the camera behind the team with the ball, so x = 0 is
+the end zone behind the camera on the anchor frame and x increases in the
+direction the offense attacks (to x = 120). With z up, y = 0 is the sideline
+on the offense's right. Every clip's camera starts with pan near 0.
 
 ```bash
 nfl-reconstruct run --config configs/clip4-full.json --run-dir runs/clip4
 ```
+
+## A new clip in one command
+
+```bash
+nfl-reconstruct clip "../data/input/Clip_5.mp4"
+```
+
+If the clip has no anchor yet, a frame browser opens first. Step to a frame
+where the yard numbers are not covered and press Enter:
+
+```text
+A / D      Previous or next frame
+[ / ]      Previous or next second
+Enter      Use the displayed frame
+Escape     Cancel
+```
+
+The clicking window then opens on that frame. Click the centers of
+the painted 20, 30, and 40 yard numbers in the order shown: on the yard line,
+between the two digits. Left click selects, `U` undoes, `R` resets, Enter
+accepts, and Escape cancels. A click that disagrees with the rest is dropped.
+
+You do not say which half of the field the numbers are on. Farther numbers sit
+higher on the screen, so if the 20 is the nearest of the three it is on the
+offense's own half (x = 30); if it is the farthest, it is on the half being
+attacked (x = 90). Left and right come from where you click, not the order.
+The command then writes `annotations/<name>-anchor.json` and
+`configs/<name>.json` and runs prepare, camera, and mosaic into
+`runs/<name>`. Running it again reuses the anchor and config.
+
+| Option | Use |
+| --- | --- |
+| `--frame N` | Skip the browser and click on frame `N` |
+| `--yard-lines 10,20,30` | Click different yard numbers |
+| `--reclick` | Replace the clip's anchor; stages that depend on it rerun |
+| `--name` | Name for the files; defaults to the video's name |
+| `--frame-range 0:30` | Run only part of the clip |
 
 ## Camera stage
 
@@ -61,10 +105,20 @@ repository's `src/`. A full clip takes about a minute.
 3. Each prediction is snapped onto the painted yard lines, so errors across
    the lines cannot build up. Along the lines, the position still comes from
    the tracked points.
-4. A pinhole camera is solved for every frame and smoothed over time. The clip
+4. After a turnover the camera swings around behind the new offense in a few
+   frames, faster than either predictor can follow. When most tracked points
+   are lost or the grid falls off the lines, the tracker circles the last good
+   camera around the middle of the picture, snaps each turn onto the lines,
+   and keeps the one whose paint (numbers, hash marks, sidelines) best lines
+   up with the last good frame. A grid turned 180 degrees fits the yard lines
+   too, so once a swing starts turning one way, only turns that keep going
+   that way count. On Clip 14 (an interception) this keeps 224 of 277 frames
+   reliable instead of 106.
+5. A pinhole camera is solved for every frame and smoothed over time. The clip
    gets one focal length unless the fit shows the lens zooming, and frames
-   with no usable grid are filled in from their neighbors.
-5. Every frame is scored by its line error: the median distance, in pixels,
+   with no usable grid are filled in from their neighbors. At the start or end
+   of a clip, the camera coasts on for up to 10 frames and is then held.
+6. Every frame is scored by its line error: the median distance, in pixels,
    from the projected yard lines to the painted ones. GOOD is under 1.5 px,
    FAIR under 4 px, and LOST beyond that or when too little of the field is in
    view. LOST frames are marked uncertain and left out of the mosaic and the
@@ -74,8 +128,8 @@ The stage writes `camera.jsonl`, one record per frame with the camera's
 homography, line error, and how its grid was found (`snapped`, `predicted`,
 or `filled`); `camera-pose.json`, the camera's position in yards, pan, tilt,
 roll, and focal length per frame for other tools; and `camera-summary.json`.
-`up_sign` is -1 when the calibration labels the sidelines so that the camera
-sits on the -z side of the field, as it does for Clip 1.
+`up_sign` is -1 if an anchor's sidelines are swapped, which mirrors the field
+and puts the camera below it; every current clip is +1.
 
 ## Side-by-side preview
 

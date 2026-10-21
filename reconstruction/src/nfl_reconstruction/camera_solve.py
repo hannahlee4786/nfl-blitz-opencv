@@ -46,6 +46,10 @@ ZOOM_IMPROVEMENT = 0.3
 # corners on fast moves.
 SMOOTHING = 2.0
 
+# Where tracking is lost at the start or end of a clip, carry the camera's
+# motion on for at most this many frames before holding it still.
+COAST_FRAMES = 10
+
 # How much each frame counts when smoothing, by how it was tracked.
 # Frames with weight 0 are filled in from their neighbors.
 SOURCE_WEIGHTS = {
@@ -244,7 +248,47 @@ def smooth_parameters(
 
     smoothed[:, 3] = (smoothed[:, 3] + 180.0) % 360.0 - 180.0
 
+    # Before the first and after the last trusted frame there is nothing to
+    # fill in between, and the smoother carries the camera's motion on in
+    # a straight line. That suits a short gap, but over a long one it
+    # drifts off the field, or under it if the camera was coming down
+    # (Clip 13). Coast a few frames, then hold.
+    trusted = np.flatnonzero(used)
+
+    if trusted.size:
+        hold_edge(smoothed, trusted[-1], 1)
+        hold_edge(smoothed, trusted[0], -1)
+
     return smoothed
+
+
+def hold_edge(
+    parameters: NDArray[np.float64],
+    trusted: int,
+    step: int,
+) -> None:
+    """
+    Past the trusted frame, going `step` (1 forward, -1 back), keep the
+    smoothed camera for at most COAST_FRAMES frames while it stays above
+    the field looking down, then hold the last of those.
+    """
+
+    held = trusted
+    frame = trusted + step
+
+    while 0 <= frame < len(parameters) and abs(frame - trusted) <= COAST_FRAMES:
+        height, tilt = parameters[frame, 2], parameters[frame, 4]
+
+        if height <= 0 or tilt <= 0:
+            break
+
+        held = frame
+        frame += step
+
+    if step > 0:
+        parameters[held + 1 :] = parameters[held]
+    else:
+        parameters[:held] = parameters[held]
 
 
 def solve_camera(

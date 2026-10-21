@@ -118,6 +118,45 @@ def measure_line_error(
     the visible field.
     """
 
+    distances = find_line_distances(distance_map, field_mask, homography)
+
+    if distances is None:
+        return float("nan")
+
+    return float(np.median(distances))
+
+
+def measure_line_fit(
+    distance_map: NDArray[np.float32],
+    field_mask: NDArray[np.uint8],
+    homography: NDArray[np.float64],
+    cap: float = 10.0,
+) -> float:
+    """
+    Like measure_line_error, but the mean of distances capped at `cap`
+    pixels. The median sits at 0 for a range of nearly right grids; the
+    mean keeps falling as one gets closer, which a search needs.
+    """
+
+    distances = find_line_distances(distance_map, field_mask, homography)
+
+    if distances is None:
+        return float("nan")
+
+    return float(np.minimum(distances, cap).mean())
+
+
+def find_line_distances(
+    distance_map: NDArray[np.float32],
+    field_mask: NDArray[np.uint8],
+    homography: NDArray[np.float64],
+) -> NDArray[np.float32] | None:
+    """
+    Return the distance, in pixels, from each projected yard-line sample
+    on the visible field to the nearest painted line, or None when too
+    few samples land there.
+    """
+
     height, width = distance_map.shape[:2]
 
     screen_points, in_front = project_field_points(
@@ -145,11 +184,9 @@ def measure_line_error(
     on_field = field_mask[rows, columns] > 0
 
     if on_field.sum() < MIN_LINE_SAMPLES:
-        return float("nan")
+        return None
 
-    return float(
-        np.median(distance_map[rows[on_field], columns[on_field]])
-    )
+    return distance_map[rows[on_field], columns[on_field]]
 
 
 def get_tracking_status(line_error: float) -> str:
