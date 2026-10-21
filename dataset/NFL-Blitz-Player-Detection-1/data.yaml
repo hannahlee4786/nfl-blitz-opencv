@@ -1,0 +1,16 @@
+path: /Users/hannahlee/Desktop/CSCI401/nfl-blitz-tracker/dataset/NFL-Blitz-Player-Detection-1
+
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names:
+  0: player
+
+roboflow:
+  workspace: hannahs-workspace-d6csq
+  project: nfl-blitz-player-detection-kdnps
+  version: 1
+  license: Private
+  url: https://app.roboflow.com/hannahs-workspace-d6csq/nfl-blitz-player-detection-kdnps/1
