@@ -1,6 +1,6 @@
 #!/bin/bash
 # YOLO11m detections, learned re-ID embeddings, and the shipped associator.
-# Usage: ml/run_tracker.sh <clip4|clip64|video path> <out_csv>
+# Usage: ml/run_tracker.sh <clip4|clip64|video path> <out_csv> [motion_out]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${NFL_PYTHON:-$ROOT/.venv/bin/python}"
@@ -16,12 +16,13 @@ WEIGHTS="$ROOT/models/yolo11m.pt"
 V4="$ROOT/data/input/Clip_4 Camera Swing and Distance Change Test.mp4"
 V64="$ROOT/data/input/Clip 64.mov"
 
-if [ "$#" -ne 2 ]; then
-  echo "usage: ml/run_tracker.sh <clip4|clip64|video path> <out_csv>" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+  echo "usage: ml/run_tracker.sh <clip4|clip64|video path> <out_csv> [motion_out]" >&2
   exit 2
 fi
 TARGET="$1"
 OUT="$2"
+MOTION_OUT="${3:-}"
 cd "$ROOT"
 mkdir -p "$(dirname "$OUT")" "$NFL_ML_CACHE/det"
 
@@ -52,4 +53,8 @@ fi
   --low 0.07 --high 0.18 --min-hits 3 --coast 14 --stitch-gap 22 --interp-gap 10 \
   --contain 0.70 --hud-max 0.50 --min-h 20 --min-w 10 --max-aspect 5.2 --min-aspect 0.45 \
   --reid "$W" --reid-assoc 0.35 --reid-stitch 0.8
+if [ -n "$MOTION_OUT" ]; then
+  mkdir -p "$(dirname "$MOTION_OUT")"
+  cp "$CACHE.motion.npy" "$MOTION_OUT"
+fi
 echo "wrote $OUT"

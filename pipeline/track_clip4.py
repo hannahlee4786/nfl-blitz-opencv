@@ -50,6 +50,10 @@ FIELD_MAP = ""
 TEAM_PROTOTYPES = None
 # External boxes CSV. None keeps the built-in detector and tracker.
 PLAYER_BOXES = None
+# Per-frame affine camera motion from the detector cache. This lets the
+# renderer distinguish a field-fixed cone from a small moving player even
+# when the field homography is stale.
+CAMERA_MOTION = None
 # (x0, x1) of the picture inside black side bars. None until the first frame.
 _CONTENT_X = None
 WRITE_VIDEO = True
@@ -4898,45 +4902,123 @@ def _hsv_to_bgr(hsv):
 
 
 def _apply_track_team_votes(rows, prototypes):
-    """Name every frame from the tracker team.
+    """Keep a stable team label, repairing only an opposite-colour prefix.
 
-    The colour classifier does not choose the name. team_conf is the share of
-    this track's confident colour frames, weighted by their per-frame
-    team_conf, whose label matches the tracker team. UNKNOWN frames are
-    ignored. A track with no confident frames gets team_conf 0. color_coverage
-    stays on the frame that measured it.
+    A stitched path can begin on the other team and later settle onto the
+    player that owns the track id. That happens to red number 72 at the start
+    of Clip 4. Conversely, a tackle-pile crop can temporarily contain more of
+    the opponent than the tracked player. Per-frame overrides therefore cause
+    flicker and label the occluded red player blue. We find one offline colour
+    change point only when the path opens with sustained opposing evidence;
+    all later contradictory crops retain the stable tracker team.
     """
-    label_of = {}
-    if prototypes:
-        for proto in prototypes:
-            label_of[str(proto.label).strip().lower()] = proto.label
     by_id = {}
     for row in rows:
         by_id.setdefault(row[1], []).append(row)
+    tracker_labels = sorted({str(row[2]).strip().lower() for row in rows})
+    display_of = {}
+    tracker_for_display = {}
+    for tracker, proto in zip(tracker_labels, prototypes or ()):
+        display = str(proto.label).strip()
+        display_of[tracker] = display
+        tracker_for_display[display.lower()] = tracker
     for group in by_id.values():
+        group.sort(key=lambda row: int(row[0]))
         tracker_counts = {}
         for row in group:
             key = str(row[2]).strip().lower()
             tracker_counts[key] = tracker_counts.get(key, 0) + 1
         tracker = max(tracker_counts, key=tracker_counts.get)
-        display = label_of.get(tracker, _display_team_name(tracker))
+        display = display_of.get(tracker, _display_team_name(tracker))
         agree = 0.0
         total = 0.0
+        evidence = []
         for row in group:
             name = str(row[3]).strip()
             conf = row[7]
+            coverage = row[8]
             if name == "" or name.upper() == "UNKNOWN" or conf == "":
+                evidence.append((None, 0.0, 0.0))
                 continue
             conf = float(conf)
+            coverage = 0.0 if coverage == "" else float(coverage)
             if conf <= 0:
+                evidence.append((None, 0.0, coverage))
                 continue
             total += conf
             if name.lower() == display.lower():
                 agree += conf
+            evidence.append((tracker_for_display.get(name.lower()), conf, coverage))
         share = 0.0 if total == 0 else round(agree / total, 4)
         for row in group:
             row[3] = display
             row[7] = share
+
+        # An opening segment needs repeated, usable opponent-colour evidence.
+        # A single bad opening crop must not repaint the track.
+        opening = {}
+        for measured_tracker, conf, coverage in evidence[:7]:
+            if (
+                measured_tracker is None
+                or measured_tracker == tracker
+                or conf < 0.55
+                or coverage < 0.20
+            ):
+                continue
+            count, score = opening.get(measured_tracker, (0, 0.0))
+            opening[measured_tracker] = (count + 1, score + conf)
+        candidates = [
+            (score, count, measured_tracker)
+            for measured_tracker, (count, score) in opening.items()
+            if count >= 3 and score >= 1.8
+        ]
+        if not candidates:
+            continue
+        _opening_score, _opening_count, opponent = max(candidates)
+
+        # Maximise evidence for [opponent prefix | tracker suffix]. Short
+        # contaminated runs inside the prefix cancel out when the original
+        # colour returns, while a durable identity switch creates the peak.
+        cumulative = 0.0
+        best_score = 0.0
+        cut = 0
+        for index, (measured_tracker, conf, coverage) in enumerate(evidence):
+            if conf >= 0.55 and coverage >= 0.20:
+                if measured_tracker == opponent:
+                    cumulative += conf
+                elif measured_tracker == tracker:
+                    cumulative -= conf
+            if cumulative > best_score:
+                best_score = cumulative
+                cut = index + 1
+        if cut == 0 or best_score < 1.8:
+            continue
+
+        prefix_votes = [
+            conf for measured_tracker, conf, coverage in evidence[:cut]
+            if measured_tracker == opponent and conf >= 0.55 and coverage >= 0.20
+        ]
+        prefix_conf = round(float(np.mean(prefix_votes)), 4) if prefix_votes else share
+        opponent_display = display_of.get(opponent, _display_team_name(opponent))
+        for row, (measured_tracker, conf, coverage) in zip(group[:cut], evidence[:cut]):
+            row[3] = opponent_display
+            if measured_tracker == opponent and conf > 0 and coverage >= 0.20:
+                row[7] = round(conf, 4)
+            else:
+                row[7] = prefix_conf
+
+
+def _team_choices_by_frame(rows):
+    """Display-team choices keyed by frame and track, not only by track.
+
+    A track can briefly follow a differently coloured player. Keying only by
+    id made its final colour overwrite every earlier frame in the rendered
+    video (for example, blue number 79 appeared red from the opening frame).
+    """
+    return {
+        (int(row[0]), int(row[1])): (row[3], row[7])
+        for row in rows
+    }
 
 
 def _display_team_name(tracker_label):
@@ -5155,7 +5237,9 @@ def render_aligned(frame, tracks, dets, status, field_map):
     left = frame.copy()
     for d in dets:
         x0, y0, bw, bh = d["bbox"]
-        c = TEAM_BGR.get(d["team"], (0, 255, 255))
+        visible_team = str(d.get("team_name", "")).strip().lower()
+        color_team = visible_team if visible_team in TEAM_BGR else d["team"]
+        c = TEAM_BGR.get(color_team, (0, 255, 255))
         cv2.rectangle(left, (x0, y0), (x0 + bw, y0 + bh), c, 2)
         foot = (int(x0 + bw / 2), int(y0 + bh))
         cv2.circle(left, foot, 5, c, -1)
@@ -5182,7 +5266,9 @@ def render_aligned(frame, tracks, dets, status, field_map):
 
     fmap = field_map.copy()
     for tr in tracks:
-        c = TEAM_BGR.get(tr["team"], (0, 255, 255))
+        visible_team = str(tr.get("team_name", "")).strip().lower()
+        color_team = visible_team if visible_team in TEAM_BGR else tr["team"]
+        c = TEAM_BGR.get(color_team, (0, 255, 255))
         pts = list(tr["trail"])
         for i in range(1, len(pts)):
             a = _on_map(pts[i - 1])
@@ -5715,6 +5801,33 @@ def _warm_orange_fraction(frame, bbox):
     return float(inner.mean())
 
 
+def _camera_to_reference_transforms(motion, nframes):
+    """Return transforms mapping each camera frame back to frame zero."""
+    if motion is None or len(motion) == 0 or nframes <= 0:
+        return None
+    count = min(int(nframes), len(motion))
+    transforms = [np.eye(3, dtype=np.float64)]
+    for frame_i in range(1, count):
+        step = np.eye(3, dtype=np.float64)
+        step[:2] = np.asarray(motion[frame_i], dtype=np.float64)
+        try:
+            inverse = np.linalg.inv(step)
+        except np.linalg.LinAlgError:
+            inverse = np.eye(3, dtype=np.float64)
+        transforms.append(transforms[-1] @ inverse)
+    return transforms
+
+
+def _transform_point(matrix, point):
+    value = matrix @ np.array([point[0], point[1], 1.0], dtype=np.float64)
+    if abs(value[2]) < 1e-9:
+        return None
+    value = value[:2] / value[2]
+    if not np.isfinite(value).all():
+        return None
+    return float(value[0]), float(value[1])
+
+
 def _sideline_cone_ids(samples, frame_hw):
     """Ids whose whole life is a stationary orange cone on the boundary.
 
@@ -5735,29 +5848,57 @@ def _sideline_cone_ids(samples, frame_hw):
             continue
         widths = [r["bw"] for r in rows]
         heights = [r["bh"] for r in rows]
-        worlds = [r["world"] for r in rows if r["world"] is not None]
-        if len(worlds) < 0.5 * len(rows):
-            continue
         med_w = float(np.median(widths))
         med_h = float(np.median(heights))
-        xs = np.array([w[0] for w in worlds], np.float64)
-        ys = np.array([w[1] for w in worlds], np.float64)
-        med_x = float(np.median(xs))
-        med_y = float(np.median(ys))
         small = med_h <= 0.060 * frame_h and med_w <= 0.040 * frame_w
         if not small:
-            tall_y.append(med_y)
-            continue
-        dist = np.hypot(xs - med_x, ys - med_y)
-        inlier = dist <= 8.0
-        if float(inlier.mean()) < 0.50:
-            continue
-        if float(xs[inlier].std()) > 2.2 or float(ys[inlier].std()) > 2.2:
+            worlds = [r["world"] for r in rows if r["world"] is not None]
+            if worlds:
+                tall_y.append(float(np.median([point[1] for point in worlds])))
             continue
         warm = float(np.median([r["warm"] for r in rows]))
         if warm < 0.30:
             continue
-        on_line = med_y <= 1.0 or med_y >= 52.3
+
+        # Camera-compensated image coordinates are the reliable signal when
+        # the field fit has gone stale. Cones remain fixed there; players do
+        # not. Keep the older ground-plane test as a fallback for callers
+        # without detector camera motion.
+        cameras = [r.get("camera") for r in rows if r.get("camera") is not None]
+        camera_fixed = False
+        camera_info = None
+        if len(cameras) >= 0.5 * len(rows):
+            points = np.asarray(cameras, np.float64)
+            center = np.median(points, axis=0)
+            distance = np.linalg.norm(points - center, axis=1)
+            inlier = distance <= 30.0
+            if float(inlier.mean()) >= 0.60:
+                spread = points[inlier].std(axis=0)
+                camera_fixed = (
+                    float(np.median(distance)) <= 18.0
+                    and float(spread[0]) <= 24.0
+                    and float(spread[1]) <= 14.0
+                )
+                camera_info = (center, spread, float(np.median(distance)))
+
+        worlds = [r["world"] for r in rows if r["world"] is not None]
+        world_fixed = False
+        med_x = med_y = xstd = ystd = 0.0
+        on_line = False
+        if len(worlds) >= 0.5 * len(rows):
+            xs = np.array([point[0] for point in worlds], np.float64)
+            ys = np.array([point[1] for point in worlds], np.float64)
+            med_x = float(np.median(xs))
+            med_y = float(np.median(ys))
+            dist = np.hypot(xs - med_x, ys - med_y)
+            inlier = dist <= 8.0
+            if float(inlier.mean()) >= 0.50:
+                xstd = float(xs[inlier].std())
+                ystd = float(ys[inlier].std())
+                world_fixed = xstd <= 2.2 and ystd <= 2.2
+            on_line = med_y <= 1.0 or med_y >= 52.3
+        if not camera_fixed and not world_fixed:
+            continue
         # tall_y is still growing; the formation test is applied after the loop.
         brief[tid] = {
             "n": len(rows),
@@ -5768,9 +5909,11 @@ def _sideline_cone_ids(samples, frame_hw):
             "warm": warm,
             "med_x": med_x,
             "med_y": med_y,
-            "xstd": float(xs[inlier].std()),
-            "ystd": float(ys[inlier].std()),
+            "xstd": xstd,
+            "ystd": ystd,
             "on_line": on_line,
+            "camera_fixed": camera_fixed,
+            "camera_info": camera_info,
         }
     # Formation extent uses every player-sized track, including ones seen
     # after a cone in the dict walk.
@@ -5781,16 +5924,24 @@ def _sideline_cone_ids(samples, frame_hw):
     cones = {}
     for tid, info in brief.items():
         past = False
-        if lo is not None:
+        if lo is not None and not info["camera_fixed"]:
             past = info["med_y"] >= hi + 6.0 or info["med_y"] <= lo - 6.0
-        if not (info["on_line"] or past):
+        if not (info["camera_fixed"] or info["on_line"] or past):
             continue
-        why = "outside y=0..53.3" if info["on_line"] else "past the player formation toward a sideline"
-        info["why"] = (
-            f"{why}; box {info['med_w']:.0f}x{info['med_h']:.0f} "
-            f"warm {info['warm']:.2f}; foot ({info['med_x']:.1f},{info['med_y']:.1f}) "
-            f"inlier std ({info['xstd']:.2f},{info['ystd']:.2f}) yd"
-        )
+        if info["camera_fixed"]:
+            _center, spread, med_distance = info["camera_info"]
+            info["why"] = (
+                f"camera-fixed; box {info['med_w']:.0f}x{info['med_h']:.0f} "
+                f"warm {info['warm']:.2f}; compensated spread "
+                f"({spread[0]:.1f},{spread[1]:.1f}) px, median {med_distance:.1f} px"
+            )
+        else:
+            why = "outside y=0..53.3" if info["on_line"] else "past the player formation toward a sideline"
+            info["why"] = (
+                f"{why}; box {info['med_w']:.0f}x{info['med_h']:.0f} "
+                f"warm {info['warm']:.2f}; foot ({info['med_x']:.1f},{info['med_y']:.1f}) "
+                f"inlier std ({info['xstd']:.2f},{info['ystd']:.2f}) yd"
+            )
         cones[tid] = info
     return cones
 
@@ -5811,6 +5962,7 @@ def render_external_boxes(n, A, status):
     last_world = {}
     cone_samples = {}
     frame_hw = None
+    camera_transforms = _camera_to_reference_transforms(CAMERA_MOTION, n)
     for i, frame in _iter_frames(n, frames):
         if i >= len(A):
             break
@@ -5840,11 +5992,18 @@ def render_external_boxes(n, A, status):
             raw = _project_point(*_foot_of(foot_box), A[i])
             if raw is not None and not np.isfinite(raw).all():
                 raw = None
+            camera = None
+            if camera_transforms is not None and i < len(camera_transforms):
+                camera = _transform_point(
+                    camera_transforms[i],
+                    _foot_of((float(x), float(y), float(bw), float(bh))),
+                )
             cone_samples.setdefault(int(float(tid)), []).append({
                 "frame": i,
                 "bw": float(bw),
                 "bh": float(bh),
                 "world": None if raw is None else (float(raw[0]), float(raw[1])),
+                "camera": camera,
                 "warm": _warm_orange_fraction(frame, bbox),
             })
     cones = _sideline_cone_ids(cone_samples, frame_hw)
@@ -5955,17 +6114,15 @@ def render_external_boxes(n, A, status):
             print(f"boxes {i}/{n} tracks={len(active)}", flush=True)
     if TEAM_PROTOTYPES is not None:
         _apply_track_team_votes(rows, TEAM_PROTOTYPES)
-        voted = {}
-        for row in rows:
-            voted[row[1]] = (row[3], row[7])
-        for _frame_i, mapped, drawn in pending_draw:
+        voted = _team_choices_by_frame(rows)
+        for frame_i, mapped, drawn in pending_draw:
             for tr in mapped:
-                choice = voted.get(tr["id"])
+                choice = voted.get((frame_i, tr["id"]))
                 if choice is None:
                     continue
                 tr["team_name"], tr["team_conf"] = choice
             for tr in drawn:
-                choice = voted.get(tr["id"])
+                choice = voted.get((frame_i, tr["id"]))
                 if choice is None:
                     continue
                 tr["team_name"], tr["team_conf"] = choice
@@ -6265,6 +6422,12 @@ if __name__ == "__main__":
         help=("CSV of frame,id,team,x,y,w,h,conf. Skips player detection "
               "and uses these boxes. Field tracking is unchanged."),
     )
+    parser.add_argument(
+        "--camera-motion",
+        default=None,
+        help=("NumPy array of per-frame affine camera motion. Used to reject "
+              "small, field-fixed sideline cones when --player-boxes is set."),
+    )
     parser.add_argument("--stop-at", type=int, default=None, metavar="N",
                         help="Process only frames 0..N-1. Frame 0 stays the roster frame.")
     args = parser.parse_args()
@@ -6281,6 +6444,10 @@ if __name__ == "__main__":
     WRITE_VIDEO = not args.no_video
     STOP_AT = args.stop_at
     PLAYER_BOXES = args.player_boxes
+    CAMERA_MOTION = None
+    if args.camera_motion:
+        CAMERA_MOTION = np.load(args.camera_motion)
+        print(f"loaded camera motion from {args.camera_motion}")
     if args.team_calibration:
         TEAM_PROTOTYPES = load_calibration_report(args.team_calibration)
         print(f"loaded team calibration from {args.team_calibration}")

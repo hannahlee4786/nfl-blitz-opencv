@@ -51,6 +51,19 @@ DEFAULTS = {
     "min_w": 10.0,
     "max_aspect": 5.2,
     "min_aspect": 0.45,
+    # A detector occasionally wraps a whole tackle pile in one person box.
+    # Keep the established tracks moving through that short occlusion instead
+    # of letting the group box replace one of them.
+    "merge_area": 2.00,
+    "merge_cover": 0.80,
+    "merge_scale": 1.60,
+    # A severe identity handoff can leave an established path following the
+    # other team for dozens of frames.  Require both a long opposing-color run
+    # and a poor re-ID match before splitting it; ordinary tackle/camera color
+    # flicker is much shorter and remains untouched.
+    "drift_trigger": 24,
+    "drift_split": 4,
+    "drift_similarity": 0.18,
 }
 
 
@@ -481,6 +494,17 @@ def overlaps_any(det: Det, others: list[Det], iou_thr: float) -> bool:
         if iou >= iou_thr or contain >= 0.62:
             return True
     return False
+
+
+def prediction_coverage(pred, det: Det) -> float:
+    """Share of a predicted player box covered by a detection."""
+    px, py, pw, ph = pred
+    left = max(px, det.x)
+    top = max(py, det.y)
+    right = min(px + pw, det.x + det.w)
+    bottom = min(py + ph, det.y + det.h)
+    inter = max(0.0, right - left) * max(0.0, bottom - top)
+    return inter / max(pw * ph, 1e-6)
 
 
 def associate_clean(frames: list[list[Det]], motion: np.ndarray, params) -> list[Track]:
@@ -968,6 +992,329 @@ def interpolate_chain(obs: list[Det], motion: np.ndarray, hud: np.ndarray, width
     return [filled[frame] for frame in sorted(filled)]
 
 
+def merged_path_frames(paths: list[dict[int, Det]], params) -> dict[int, set[int]]:
+    """Find output boxes that enclose another track like a tackle-pile box."""
+    suspicious: dict[int, set[int]] = {}
+    frames = sorted({frame for path in paths for frame in path})
+    for frame in frames:
+        present = [(index, path[frame]) for index, path in enumerate(paths) if frame in path]
+        for index, det in present:
+            if det.uid < 0:
+                continue
+            det_area = det.w * det.h
+            for other_index, other in present:
+                if other_index == index:
+                    continue
+                other_area = other.w * other.h
+                if det_area < params["merge_area"] * other_area:
+                    continue
+                if (
+                    det.w < params["merge_scale"] * other.w
+                    and det.h < params["merge_scale"] * other.h
+                ):
+                    continue
+                other_box = (other.x, other.y, other.w, other.h)
+                if prediction_coverage(other_box, det) < params["merge_cover"]:
+                    continue
+                suspicious.setdefault(index, set()).add(frame)
+                break
+    return suspicious
+
+
+def _occluded_det(a: Det, b: Det, frame: int, motion: np.ndarray) -> Det:
+    alpha = (frame - a.frame) / max(b.frame - a.frame, 1)
+    ax, ay, aw, ah = transform_box(
+        compose(motion, a.frame, frame), a.x, a.y, a.w, a.h
+    )
+    bx, by, bw, bh = transform_box(
+        compose(motion, b.frame, frame), b.x, b.y, b.w, b.h
+    )
+    return Det(
+        -2,
+        frame,
+        (1 - alpha) * ax + alpha * bx,
+        (1 - alpha) * ay + alpha * by,
+        max(4.0, (1 - alpha) * aw + alpha * bw),
+        max(4.0, (1 - alpha) * ah + alpha * bh),
+        0.05,
+        a.team,
+        a.hist,
+        emb=a.emb,
+    )
+
+
+def repair_merged_occlusions(paths: list[dict[int, Det]], motion: np.ndarray, params) -> int:
+    """Replace a group box and its following gap with per-track predictions."""
+    suspicious = merged_path_frames(paths, params)
+    repaired = 0
+    for index, marked in suspicious.items():
+        remaining = sorted(marked)
+        groups = []
+        for frame in remaining:
+            if not groups or frame - groups[-1][-1] > 2:
+                groups.append([frame])
+            else:
+                groups[-1].append(frame)
+
+        path = paths[index]
+        for group in groups:
+            first, last = group[0], group[-1]
+            before = sorted(frame for frame in path if frame < first)
+            if not before:
+                continue
+            sample = before[-8:]
+            baseline_area = float(
+                np.percentile([path[frame].w * path[frame].h for frame in sample], 40)
+            )
+            clean_before = [
+                frame
+                for frame in sample
+                if path[frame].w * path[frame].h <= 2.0 * baseline_area
+            ]
+            if not clean_before:
+                continue
+            left = max(clean_before)
+            left_area = path[left].w * path[left].h
+            clean_limit = 2.0 * max(baseline_area, left_area)
+            rights = sorted(
+                frame
+                for frame in path
+                if frame > last
+                and frame not in marked
+                and path[frame].w * path[frame].h <= clean_limit
+            )
+            if not rights:
+                continue
+            right = rights[0]
+            # A group observation can precede a detector gap. Repair through
+            # that gap only when the same identity returns inside the normal
+            # coasting horizon.
+            if right - last - 1 > params["coast"]:
+                continue
+            a, b = path[left], path[right]
+            for frame in range(left + 1, right):
+                path[frame] = _occluded_det(a, b, frame, motion)
+                repaired += 1
+    return repaired
+
+
+def _mean_embedding(detections: list[Det]) -> np.ndarray | None:
+    embeddings = [det.emb for det in detections if det.emb is not None]
+    if not embeddings:
+        return None
+    mean = np.mean(embeddings, axis=0)
+    norm = float(np.linalg.norm(mean))
+    if norm < 1e-8:
+        return None
+    return mean / norm
+
+
+def repair_bad_handoffs(paths: list[dict[int, Det]], teams: list[str]) -> int:
+    """Move a late continuation back onto a badly switched opening path.
+
+    A long-lived roster path can jump to a nearby opponent while a new path
+    starts on the original player. Re-ID makes that failure distinctive: the
+    old path's suffix is nearly unrelated to its opening, while the nearby
+    new path is a substantially better match. Transfer that continuation and
+    discard the wrong suffix. Conservative thresholds limit this to severe
+    handoff failures rather than ordinary appearance changes.
+    """
+    repaired = 0
+    used = set()
+    for main_i, main in enumerate(paths):
+        if not main or min(main) != 0:
+            continue
+        prefix = [main[frame] for frame in sorted(main) if frame <= 60]
+        reference = _mean_embedding(prefix)
+        if reference is None:
+            continue
+        best = None
+        for candidate_i, candidate in enumerate(paths):
+            if candidate_i == main_i or candidate_i in used or not candidate:
+                continue
+            if teams[candidate_i] != teams[main_i] or len(candidate) < 20:
+                continue
+            start = min(candidate)
+            if start < 30 or start > max(main):
+                continue
+            nearby = [
+                main[frame]
+                for frame in range(start - 3, start + 4)
+                if frame in main
+            ]
+            if not nearby:
+                continue
+            first = candidate[start]
+            spatial = min(
+                np.hypot(
+                    det.cx - first.cx,
+                    det.y + det.h - (first.y + first.h),
+                ) / max(30.0, 0.5 * (det.h + first.h))
+                for det in nearby
+            )
+            if spatial > 0.65:
+                continue
+            candidate_head = _mean_embedding(
+                [candidate[frame] for frame in sorted(candidate)[:15]])
+            current_head = _mean_embedding(
+                [main[frame] for frame in sorted(main) if frame >= start][:15])
+            if candidate_head is None or current_head is None:
+                continue
+            candidate_match = cosine(reference, candidate_head)
+            current_match = cosine(reference, current_head)
+            margin = candidate_match - current_match
+            if candidate_match < 0.18 or current_match > 0.08 or margin < 0.10:
+                continue
+            choice = (margin, candidate_match, -spatial, candidate_i, start)
+            if best is None or choice > best:
+                best = choice
+        if best is None:
+            continue
+        _margin, _match, _distance, candidate_i, start = best
+        candidate = paths[candidate_i]
+        for frame in [frame for frame in main if frame >= start]:
+            del main[frame]
+        for frame, det in candidate.items():
+            if frame >= start:
+                main[frame] = det
+        candidate.clear()
+        used.add(candidate_i)
+        repaired += 1
+    return repaired
+
+
+def split_sustained_team_drift(
+    paths: list[dict[int, Det]],
+    teams: list[str],
+    trigger_frames: int = 24,
+    split_frames: int = 4,
+    max_similarity: float = 0.18,
+) -> tuple[int, int]:
+    """Split opponent handoffs without reacting to brief color mistakes.
+
+    ``teams`` is the stable roster team for each path, while ``Det.team`` is
+    still the detector's per-frame color evidence.  A path is considered
+    corrupted only when it follows the opposite team for a long continuous
+    run and that run is a poor re-ID match for the path's opening.  Once that
+    strong signal exists, shorter opposing-team runs on the same corrupted
+    path become new tracks of their observed team. This preserves a real
+    player detection without drawing the old identity over that opponent.
+    """
+
+    moved = 0
+    split_paths: list[dict[int, Det]] = []
+    split_teams: list[str] = []
+    for path, stable_team in list(zip(paths, teams)):
+        if not path:
+            continue
+        frames = sorted(path)
+        anchor_detections = [
+            path[frame]
+            for frame in frames[:40]
+            if path[frame].team == stable_team
+        ]
+        anchor = _mean_embedding(anchor_detections)
+        if anchor is None:
+            continue
+
+        runs: list[list[int]] = []
+        run: list[int] = []
+        for frame in frames:
+            if path[frame].team != stable_team:
+                if run and frame != run[-1] + 1:
+                    runs.append(run)
+                    run = []
+                run.append(frame)
+            elif run:
+                runs.append(run)
+                run = []
+        if run:
+            runs.append(run)
+
+        corrupted = False
+        for opposing_run in runs:
+            if len(opposing_run) < trigger_frames:
+                continue
+            run_embedding = _mean_embedding(
+                [path[frame] for frame in opposing_run]
+            )
+            if run_embedding is not None and cosine(anchor, run_embedding) < max_similarity:
+                corrupted = True
+                break
+        if not corrupted:
+            continue
+
+        current_split: dict[int, Det] | None = None
+        previous_end: int | None = None
+        for opposing_run in runs:
+            if len(opposing_run) < split_frames:
+                continue
+            # A one-frame color interruption commonly divides one continuous
+            # opponent track. Keep those pieces under one new identity.
+            if previous_end is None or opposing_run[0] - previous_end > 2:
+                current_split = {}
+                split_paths.append(current_split)
+                split_teams.append(path[opposing_run[0]].team)
+            for frame in opposing_run:
+                current_split[frame] = path.pop(frame)
+                moved += 1
+            previous_end = opposing_run[-1]
+    paths.extend(split_paths)
+    teams.extend(split_teams)
+    return moved, len(split_paths)
+
+
+def suppress_interpolated_cross_team_duplicates(
+    paths: list[dict[int, Det]], teams: list[str]
+) -> int:
+    """Drop an interpolated box nested inside an observed opponent box.
+
+    Interpolation occasionally carries a blue path across red number 72 while
+    the real red path is already present. Detector observations from two teams
+    are kept for tackle piles; only a persistent run of synthetic ``uid ==
+    -1`` duplicates is eligible for removal. Merge-repair boxes use ``uid ==
+    -2`` and are also preserved.
+    """
+    candidates: dict[tuple[int, int], list[int]] = {}
+    frames = sorted({frame for path in paths for frame in path})
+    for frame in frames:
+        present = [index for index, path in enumerate(paths) if frame in path]
+        for offset, first_i in enumerate(present):
+            first = paths[first_i][frame]
+            for second_i in present[offset + 1:]:
+                if teams[first_i] == teams[second_i]:
+                    continue
+                second = paths[second_i][frame]
+                if containment(first, second) < 0.80:
+                    continue
+                if first.uid == -1 and second.uid >= 0:
+                    candidates.setdefault((first_i, second_i), []).append(frame)
+                elif second.uid == -1 and first.uid >= 0:
+                    candidates.setdefault((second_i, first_i), []).append(frame)
+    drops = set()
+    for (drop_i, _keep_i), matching in candidates.items():
+        run = []
+        runs = []
+        for frame in matching:
+            if run and frame != run[-1] + 1:
+                runs.append(run)
+                run = []
+            run.append(frame)
+        if run:
+            runs.append(run)
+        # Real opponents can nest briefly while crossing or tackling. The bad
+        # carried path stays nested frame after frame after its detector is
+        # gone, so require persistence before removing it.
+        for run in runs:
+            if len(run) < 4:
+                continue
+            for frame in run:
+                drops.add((drop_i, frame))
+    for index, frame in drops:
+        del paths[index][frame]
+    return len(drops)
+
+
 def per_frame_suppress(paths: list[dict[int, Det]], teams: list[str]) -> int:
     removed = 0
     frames = sorted({frame for path in paths for frame in path})
@@ -980,6 +1327,11 @@ def per_frame_suppress(paths: list[dict[int, Det]], teams: list[str]) -> int:
             drop = False
             for other_i in keep:
                 other = paths[other_i][frame]
+                # These boxes are distinct identities carried through a known
+                # multi-player detector merge. Their overlap is the reason the
+                # repair exists, not evidence that either track is duplicate.
+                if det.uid == -2 or other.uid == -2:
+                    continue
                 if teams[index] != teams[other_i]:
                     continue
                 iou = box_iou((det.x, det.y, det.w, det.h), (other.x, other.y, other.w, other.h))
@@ -1105,15 +1457,29 @@ def run(stem: Path, out: Path, params: dict) -> dict:
     teams = []
     for chain in chains:
         obs = chain_obs(chain)
-        for det in obs:
-            det.team = chain[0].team
         filled = interpolate_chain(obs, motion, hud, width, height, params)
-        for det in filled:
-            det.team = chain[0].team
         paths.append({det.frame: det for det in filled})
         teams.append(chain[0].team)
+    handoffs = repair_bad_handoffs(paths, teams)
     swaps = unswap(paths, teams)
+    repaired = repair_merged_occlusions(paths, motion, params)
     removed = per_frame_suppress(paths, teams)
+    cross_team_removed = suppress_interpolated_cross_team_duplicates(paths, teams)
+    drift_reassigned, drift_tracks = split_sustained_team_drift(
+        paths,
+        teams,
+        trigger_frames=params["drift_trigger"],
+        split_frames=params["drift_split"],
+        max_similarity=params["drift_similarity"],
+    )
+    # Splitting changes the stable team of these boxes, so repeat same-team
+    # suppression in case an established red path already covers one.
+    removed += per_frame_suppress(paths, teams)
+    # The stable chain team is what gets exported. Preserve raw per-frame team
+    # evidence only until all drift/occlusion repairs have consumed it.
+    for path, team in zip(paths, teams):
+        for det in path.values():
+            det.team = team
     # Drop identities that lost every box.
     packed_paths, packed_teams = [], []
     for path, team in zip(paths, teams):
@@ -1137,7 +1503,12 @@ def run(stem: Path, out: Path, params: dict) -> dict:
         "output_ids": len(set(row["id"] for row in out_rows)),
         "frame0": len(frame0),
         "unswaps": swaps,
+        "repaired_handoffs": handoffs,
+        "merged_occlusion_boxes": repaired,
         "duplicate_boxes_removed": removed,
+        "cross_team_interpolations_removed": cross_team_removed,
+        "sustained_team_drift_reassigned": drift_reassigned,
+        "sustained_team_drift_tracks": drift_tracks,
         "seconds": round(time.perf_counter() - started, 3),
         "nframes": int(meta["nframes"]),
     }

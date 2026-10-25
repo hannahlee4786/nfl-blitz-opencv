@@ -25,7 +25,8 @@ else
 fi
 
 mkdir -p "$OUT"
-bash "$ROOT/ml/run_tracker.sh" "$TARGET" "$OUT/player_boxes.csv"
+MOTION="$OUT/player_boxes.motion.npy"
+bash "$ROOT/ml/run_tracker.sh" "$TARGET" "$OUT/player_boxes.csv" "$MOTION"
 
 anchor=(--anchor -15)
 for arg in "$@"; do
@@ -41,6 +42,7 @@ set -o pipefail
   --video "$VIDEO" \
   --out-dir "$OUT" \
   --player-boxes "$OUT/player_boxes.csv" \
+  --camera-motion "$MOTION" \
   "${anchor[@]}" \
   "$@" \
   | awk 'BEGIN { bad = 0 } /^FATAL/ { bad = 1 } { print; fflush() } END { exit bad }'

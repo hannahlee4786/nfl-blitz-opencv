@@ -13,7 +13,13 @@ from src.team_classifier import (
     prototype_distance,
 )
 from src.classify_teams import load_calibration_report
-from pipeline.track_clip4 import _jersey_box, _with_team_classification
+from pipeline.track_clip4 import (
+    _apply_track_team_votes,
+    _jersey_box,
+    _sideline_cone_ids,
+    _team_choices_by_frame,
+    _with_team_classification,
+)
 
 
 def solid_bgr(color, width=20, height=20):
@@ -138,6 +144,79 @@ class TeamClassifierTests(unittest.TestCase):
         self.assertEqual(classified[0]["team_name"], "RED")
         self.assertGreater(classified[0]["team_conf"], 0.95)
         self.assertGreater(classified[0]["color_coverage"], 0.95)
+
+    def test_sustained_opponent_prefix_can_override_switched_track_team(self):
+        rows = [
+            [0, 8, "blue", "RED", "", "", 0.9, 0.80, 0.96],
+            [1, 8, "blue", "RED", "", "", 0.9, 0.78, 0.96],
+            [2, 8, "blue", "RED", "", "", 0.9, 0.79, 0.95],
+            [3, 8, "blue", "RED", "", "", 0.9, 0.81, 0.94],
+            [4, 8, "blue", "RED", "", "", 0.9, 0.82, 0.94],
+            [5, 8, "blue", "BLUE", "", "", 0.9, 0.90, 0.95],
+            [0, 4, "red", "RED", "", "", 0.9, 0.90, 0.95],
+        ]
+
+        _apply_track_team_votes(rows, (self.blue, self.red))
+
+        self.assertEqual(rows[0][3], "RED")
+        self.assertEqual(rows[0][7], 0.8)
+        self.assertEqual(rows[4][3], "RED")
+        self.assertEqual(rows[5][3], "BLUE")
+
+    def test_mid_track_opponent_crop_does_not_repaint_player(self):
+        rows = [
+            [0, 12, "red", "RED", "", "", 0.9, 0.90, 0.95],
+            [1, 12, "red", "RED", "", "", 0.9, 0.85, 0.95],
+            [2, 12, "red", "BLUE", "", "", 0.9, 0.99, 1.00],
+            [3, 12, "red", "BLUE", "", "", 0.9, 0.99, 1.00],
+            [4, 12, "red", "RED", "", "", 0.9, 0.80, 0.95],
+            [0, 9, "blue", "BLUE", "", "", 0.9, 0.90, 0.95],
+        ]
+
+        _apply_track_team_votes(rows, (self.blue, self.red))
+
+        self.assertTrue(all(row[3] == "RED" for row in rows if row[1] == 12))
+
+    def test_render_choices_keep_each_frames_team_label(self):
+        rows = [
+            [0, 8, "blue", "RED", "", "", 0.9, 0.8, 0.9],
+            [1, 8, "blue", "BLUE", "", "", 0.9, 0.9, 0.9],
+        ]
+
+        choices = _team_choices_by_frame(rows)
+
+        self.assertEqual(choices[(0, 8)], ("RED", 0.8))
+        self.assertEqual(choices[(1, 8)], ("BLUE", 0.9))
+
+    def test_camera_fixed_small_warm_track_is_a_sideline_cone(self):
+        samples = {
+            24: [
+                {
+                    "frame": frame,
+                    "bw": 28.0,
+                    "bh": 43.0,
+                    "warm": 0.65,
+                    "world": None,
+                    "camera": (100.0 + frame % 3, 200.0 - frame % 2),
+                }
+                for frame in range(20)
+            ],
+            7: [
+                {
+                    "frame": frame,
+                    "bw": 90.0,
+                    "bh": 125.0,
+                    "warm": 0.55,
+                    "world": None,
+                    "camera": (300.0, 400.0),
+                }
+                for frame in range(20)
+            ],
+        }
+
+        cones = _sideline_cone_ids(samples, (1016, 1354))
+
+        self.assertEqual(set(cones), {24})
 
 
 if __name__ == "__main__":
