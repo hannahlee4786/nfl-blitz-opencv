@@ -52,6 +52,9 @@ fi
 "$PY" ml/track_assoc.py --cache "$CACHE" --out "$OUT" \
   --low 0.07 --high 0.18 --min-hits 3 --coast 14 --stitch-gap 22 --interp-gap 10 \
   --contain 0.70 --hud-max 0.50 --min-h 20 --min-w 10 --max-aspect 5.2 --min-aspect 0.45 \
+  --team-penalty 0.5 --team-margin 0.6 --team-partial 0.9 \
+  --roster-rescue-len 12 --roster-rescue-conf 0.30 --icon-chain-share 0.5 \
+  --cone-run-frames 12 --cone-warm 0.30 \
   --reid "$W" --reid-assoc 0.35 --reid-stitch 0.8
 if [ -n "$MOTION_OUT" ]; then
   mkdir -p "$(dirname "$MOTION_OUT")"

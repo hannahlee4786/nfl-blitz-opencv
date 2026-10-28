@@ -4,9 +4,14 @@
 Pipeline, all offline and zero-shot:
 
 1. Load cached every-frame boxes (see ml/detect_all.py).
-2. Drop HUD boxes and partial duplicate boxes.
+2. Drop HUD boxes, '1' player-indicator boxes, and partial duplicate boxes.
+   Plaque boxes on wide shots stay in until the roster is chosen, then a
+   chain that is mostly plaque is dropped and others lose those boxes.
+   A player track that coasted onto a sideline pylon loses that run of
+   small, warm, camera-fixed boxes after all repairs.
 3. Associate forward and backward (ByteTrack-style high/low passes) in the
-   camera-compensated frame.
+   camera-compensated frame. A box whose jersey is clearly the other team
+   costs more to join a track.
 4. Stitch tracklets of the same team when motion, appearance, the backward
    pass, or the quarterback marker agree. At most the long tracks are kept;
    weak duplicate tracks are removed.
@@ -21,6 +26,7 @@ Clip 64 must be run with the same flags used for Clip 4.
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import json
 import sys
@@ -64,6 +70,30 @@ DEFAULTS = {
     "drift_trigger": 24,
     "drift_split": 4,
     "drift_similarity": 0.18,
+    # Tracks jump onto an opponent in contact and keep their own team. When
+    # the detection's jersey is clearly the other color, add this much on
+    # top of the usual 0.25 team mismatch cost.
+    "team_penalty": 0.5,
+    "team_margin": 0.6,
+    # A box shorter than this share of the track's recent height is a
+    # partial body, often legs and the carried football, so its torso band
+    # is not the jersey. Such a box gets no extra team penalty.
+    "team_partial": 0.9,
+    # limit_roster ranks chains over the whole clip. A chain past the top 7
+    # is still kept when it has this many detections, one at least
+    # roster_rescue_conf, and its team has fewer than 7 kept chains on every
+    # frame it publishes. 0 turns the rescue off.
+    "roster_rescue_len": 12,
+    "roster_rescue_conf": 0.30,
+    # After association, a chain at least this share '1' plaque boxes
+    # (ICON_AFTER) is dropped; other chains only lose their plaque boxes.
+    "icon_chain_share": 0.5,
+    # A player track can coast onto a sideline pylon. A run of at least
+    # cone_run_frames small, warm, camera-fixed boxes inside a player-sized
+    # track is removed. 0 turns this off. Size and fixed-point limits match
+    # the whole-track cone filter in pipeline/track_clip4.py.
+    "cone_run_frames": 12,
+    "cone_warm": 0.30,
 }
 
 
@@ -275,7 +305,154 @@ def load_cache(stem: Path):
     return meta, rows, hist, motion, hud, markers
 
 
-def build_frames(meta, rows, hist, hud, params, emb=None) -> list[list[Det]]:
+# Icon levels written by ml/detect_all.py: ICON_BEFORE boxes are dropped
+# before association, ICON_AFTER boxes are removed from chains afterwards.
+ICON_AFTER = 1
+ICON_BEFORE = 2
+
+
+def load_icons(stem: Path, nrows: int) -> np.ndarray | None:
+    """Per-row '1' plaque levels from ml/detect_all.py, or None for an older cache.
+
+    A bool file from before the two levels existed marks ICON_BEFORE boxes.
+    """
+    path = stem.with_suffix(".icons.npy")
+    if not path.is_file():
+        return None
+    icons = np.load(path)
+    if len(icons) != nrows:
+        raise RuntimeError(f"icon rows {len(icons)} != csv rows {nrows}")
+    if icons.dtype == bool:
+        return icons.astype(np.uint8) * ICON_BEFORE
+    return icons
+
+
+def load_warm(stem: Path, nrows: int) -> np.ndarray | None:
+    """Per-row cone warm share from ml/detect_all.py, or None for an older cache."""
+    path = stem.with_suffix(".warm.npy")
+    if not path.is_file():
+        return None
+    warm = np.load(path)
+    if len(warm) != nrows:
+        raise RuntimeError(f"warm rows {len(warm)} != csv rows {nrows}")
+    return warm
+
+
+def reference_transforms(motion: np.ndarray) -> list[np.ndarray]:
+    """3x3 transforms mapping each frame back onto frame zero."""
+    transforms = [np.eye(3, dtype=np.float64)]
+    for frame in range(1, len(motion)):
+        step = np.eye(3, dtype=np.float64)
+        step[:2] = motion[frame]
+        try:
+            inverse = np.linalg.inv(step)
+        except np.linalg.LinAlgError:
+            inverse = np.eye(3, dtype=np.float64)
+        transforms.append(transforms[-1] @ inverse)
+    return transforms
+
+
+def remove_cone_runs(
+    paths: list[dict[int, Det]],
+    warm: np.ndarray | None,
+    to_ref: list[np.ndarray],
+    width: int,
+    height: int,
+    min_frames: int,
+    min_warm: float,
+) -> int:
+    """Remove sideline-pylon runs from player-sized tracks; returns the box count.
+
+    pipeline/track_clip4.py removes whole tracks that are a pylon. A player
+    track that coasts onto a pylon keeps a player-sized median box and
+    passes that test. Here the same tests run on each run of small boxes
+    (at most 6% of the frame tall and 4% wide, gaps of at most 3 frames)
+    inside a track whose median box is not small: at least min_frames
+    boxes, median warm share of its detected boxes at least min_warm, and
+    feet fixed after camera motion (60% within 30 px of the median, median
+    distance at most 18 px, spread at most 24 px across and 14 px down).
+    Pylon-sized tracks are left to the whole-track filter.
+    """
+    if warm is None or min_frames <= 0:
+        return 0
+
+    def small(det: Det) -> bool:
+        return det.h <= 0.06 * height and det.w <= 0.04 * width
+
+    removed = 0
+    for path in paths:
+        if not path:
+            continue
+        frames = sorted(path)
+        median_h = float(np.median([path[f].h for f in frames]))
+        median_w = float(np.median([path[f].w for f in frames]))
+        if median_h <= 0.06 * height and median_w <= 0.04 * width:
+            continue
+        runs: list[list[int]] = []
+        run: list[int] = []
+        for frame in frames:
+            if small(path[frame]) and (not run or frame - run[-1] <= 3):
+                run.append(frame)
+            else:
+                if run:
+                    runs.append(run)
+                run = [frame] if small(path[frame]) else []
+        if run:
+            runs.append(run)
+        for run in runs:
+            if len(run) < min_frames:
+                continue
+            detected = [warm[path[f].uid] for f in run if path[f].uid >= 0]
+            if not detected or float(np.median(detected)) < min_warm:
+                continue
+            feet = []
+            for frame in run:
+                det = path[frame]
+                point = to_ref[frame] @ np.array([det.cx, det.y + det.h, 1.0])
+                feet.append(point[:2] / point[2])
+            feet = np.asarray(feet)
+            center = np.median(feet, axis=0)
+            distance = np.linalg.norm(feet - center, axis=1)
+            inlier = distance <= 30.0
+            if float(inlier.mean()) < 0.60 or float(np.median(distance)) > 18.0:
+                continue
+            spread = feet[inlier].std(axis=0)
+            if float(spread[0]) > 24.0 or float(spread[1]) > 14.0:
+                continue
+            for frame in run:
+                del path[frame]
+            removed += len(run)
+    return removed
+
+
+def strip_icon_chains(
+    chains: list[list[Tlet]], icons: np.ndarray | None, max_share: float
+) -> tuple[list[tuple[list[Tlet], list[Det]]], int, int]:
+    """Remove ICON_AFTER detections from chains after association.
+
+    A chain whose detections are at least max_share icon is the icon itself;
+    its few real boxes are the icon track drifting onto a player who already
+    has his own track, so the whole chain goes. Other chains keep every real
+    detection and lose only their icon ones. Returns (chain, observations)
+    pairs, the dropped chain count, and the stripped detection count.
+    """
+    if icons is None:
+        return [(chain, chain_obs(chain)) for chain in chains], 0, 0
+    kept = []
+    dropped = 0
+    stripped = 0
+    for chain in chains:
+        obs = chain_obs(chain)
+        real = [det for det in obs if icons[det.uid] != ICON_AFTER]
+        if not real or len(obs) - len(real) >= max_share * len(obs):
+            dropped += 1
+            continue
+        stripped += len(obs) - len(real)
+        kept.append((chain, real))
+    return kept, dropped, stripped
+
+
+def build_frames(meta, rows, hist, hud, params, emb=None, icons=None) -> list[list[Det]]:
     width, height = int(meta["width"]), int(meta["height"])
     nframes = int(meta["nframes"])
     per_frame: list[list[Det]] = [[] for _ in range(nframes)]
@@ -303,6 +480,8 @@ def build_frames(meta, rows, hist, hud, params, emb=None) -> list[list[Det]]:
             continue
         if hud_fraction(hud, det, width, height) > params["hud_max"]:
             continue
+        if icons is not None and icons[uid] == ICON_BEFORE:
+            continue
         if det.frame < 0 or det.frame >= nframes:
             continue
         per_frame[det.frame].append(det)
@@ -311,7 +490,32 @@ def build_frames(meta, rows, hist, hud, params, emb=None) -> list[list[Det]]:
     return per_frame
 
 
-def pair_cost(pred, det: Det, track: Track, min_iou: float) -> float:
+def jersey_margin(det: Det) -> float:
+    """How clearly the torso is one team color, 0 (mixed or none) to 1.
+
+    Uses the cached 12x4 hue-saturation histogram from ml/detect_all.py:
+    hue bins 0 and 11 are red, 7 and 8 are blue, and the lowest saturation
+    bin is left out.
+    """
+    if det.hist is None:
+        return 0.0
+    counts = np.asarray(det.hist, dtype=np.float64).reshape(12, 4)
+    red = float(counts[[0, 11], 1:].sum())
+    blue = float(counts[[7, 8], 1:].sum())
+    if red + blue < 0.08:
+        return 0.0
+    return abs(red - blue) / (red + blue)
+
+
+def pair_cost(
+    pred,
+    det: Det,
+    track: Track,
+    min_iou: float,
+    team_penalty: float = 0.0,
+    team_margin: float = 1.0,
+    team_partial: float = 0.0,
+) -> float:
     px, py, pw, ph = pred
     iou = box_iou((px, py, pw, ph), (det.x, det.y, det.w, det.h))
     if min_iou > 0 and iou < min_iou:
@@ -329,10 +533,34 @@ def pair_cost(pred, det: Det, track: Track, min_iou: float) -> float:
     cost = dist / max(allow, 1.0) + 0.35 * (1.0 - iou) + 0.08 * (1.0 - app)
     if track.team() != det.team and (track.red + track.blue) >= 4:
         cost += 0.25
+        if (
+            team_penalty > 0
+            and jersey_margin(det) >= team_margin
+            and not partial_body(det, track, team_partial)
+        ):
+            cost += team_penalty
     return cost
 
 
-def match_tracks(tracks, preds, dets, min_iou: float, gate: float, reid_w: float = 0.0):
+def partial_body(det: Det, track: Track, ratio: float) -> bool:
+    """True when the box is much shorter than the track's last five boxes."""
+    if ratio <= 0:
+        return False
+    recent = float(np.median([obs.h for obs in track.obs[-5:]]))
+    return det.h < ratio * recent
+
+
+def match_tracks(
+    tracks,
+    preds,
+    dets,
+    min_iou: float,
+    gate: float,
+    reid_w: float = 0.0,
+    team_penalty: float = 0.0,
+    team_margin: float = 1.0,
+    team_partial: float = 0.0,
+):
     if not tracks or not dets:
         return []
     cost = np.full((len(tracks), len(dets)), 1e5, dtype=np.float64)
@@ -340,7 +568,7 @@ def match_tracks(tracks, preds, dets, min_iou: float, gate: float, reid_w: float
         if preds[i] is None:
             continue
         for j, det in enumerate(dets):
-            cost[i, j] = pair_cost(preds[i], det, track, min_iou)
+            cost[i, j] = pair_cost(preds[i], det, track, min_iou, team_penalty, team_margin, team_partial)
     if reid_w > 0:
         # A clear motion winner stays put: appearance gaps are ~0.2 cosine,
         # so this term only flips a match when two same-team boxes are close.
@@ -507,6 +735,15 @@ def prediction_coverage(pred, det: Det) -> float:
     return inter / max(pw * ph, 1e-6)
 
 
+def _match_options(params) -> dict:
+    return {
+        "reid_w": params.get("reid_assoc", 0.0),
+        "team_penalty": params.get("team_penalty", 0.0),
+        "team_margin": params.get("team_margin", 1.0),
+        "team_partial": params.get("team_partial", 0.0),
+    }
+
+
 def associate_clean(frames: list[list[Det]], motion: np.ndarray, params) -> list[Track]:
     """Forward association. Tentative low-score tracks need a second hit."""
     alive: list[Track] = []
@@ -520,7 +757,7 @@ def associate_clean(frames: list[list[Det]], motion: np.ndarray, params) -> list
         used_tracks: set[int] = set()
         used_dets: set[int] = set()
 
-        for row, col in match_tracks(alive, preds, high_dets, min_iou=0.0, gate=1.55, reid_w=params.get("reid_assoc", 0.0)):
+        for row, col in match_tracks(alive, preds, high_dets, min_iou=0.0, gate=1.55, **_match_options(params)):
             update_track(alive[row], high_dets[col], motion)
             used_tracks.add(row)
             used_dets.add(id(high_dets[col]))
@@ -528,7 +765,7 @@ def associate_clean(frames: list[list[Det]], motion: np.ndarray, params) -> list
         remain_i = [i for i in range(len(alive)) if i not in used_tracks]
         remain = [alive[i] for i in remain_i]
         remain_preds = [preds[i] for i in remain_i]
-        for row, col in match_tracks(remain, remain_preds, low_dets, min_iou=0.0, gate=1.45, reid_w=params.get("reid_assoc", 0.0)):
+        for row, col in match_tracks(remain, remain_preds, low_dets, min_iou=0.0, gate=1.45, **_match_options(params)):
             update_track(remain[row], low_dets[col], motion)
             used_tracks.add(remain_i[row])
             used_dets.add(id(low_dets[col]))
@@ -559,7 +796,7 @@ def associate_clean(frames: list[list[Det]], motion: np.ndarray, params) -> list
         free = [det for det in low_dets if id(det) not in used_dets and not overlaps_any(det, taken, 0.32)]
         used_tent = set()
         next_tent = []
-        for row, col in match_tracks(tentative, tent_preds, free, min_iou=0.0, gate=1.45, reid_w=params.get("reid_assoc", 0.0)):
+        for row, col in match_tracks(tentative, tent_preds, free, min_iou=0.0, gate=1.45, **_match_options(params)):
             update_track(tentative[row], free[col], motion)
             used_tent.add(row)
             used_dets.add(id(free[col]))
@@ -847,29 +1084,56 @@ def drop_duplicate_chains(chains: list[list[Tlet]]) -> list[list[Tlet]]:
     return [chain for index, chain in enumerate(chains) if index not in drop]
 
 
-def limit_roster(chains: list[list[Tlet]]) -> list[list[Tlet]]:
+def published_frames(obs: list[Det], interp_gap: int) -> set[int]:
+    """Frames a chain will have a box on: its observations plus gaps interpolate_chain fills."""
+    frames = sorted(det.frame for det in obs)
+    present = set(frames)
+    for left, right in zip(frames, frames[1:]):
+        if 1 < right - left <= interp_gap + 1:
+            present.update(range(left + 1, right))
+    return present
+
+
+def limit_roster(
+    chains: list[list[Tlet]],
+    rescue_len: int = 0,
+    rescue_conf: float = 1.0,
+    interp_gap: int = 0,
+) -> list[list[Tlet]]:
     """Drop weak extra chains so a team does not keep obvious false tracks.
 
     Long tracks are kept even if that leaves more than 7 ids. Forcing a merge
     or a drop of a real player costs more IDF1 than an extra short false track
     that already failed the duplicate test.
+
+    Ranking is over the whole clip, so on a busy play a short chain of a real
+    player can rank past 7 while far fewer teammates are on screen. With
+    rescue_len > 0 such a chain is kept when it has at least rescue_len
+    detections, one at rescue_conf or higher, and no frame where it would
+    publish a box already holds 7 kept chains of its team.
     """
     kept = []
     by_team: dict[str, list[tuple[float, list[Tlet]]]] = {"red": [], "blue": []}
     for chain in chains:
         obs = chain_obs(chain)
         score = sum(det.conf for det in obs)
-        by_team[chain[0].team].append((score, chain, len(obs)))
+        by_team[chain[0].team].append((score, chain, obs))
     for team, items in by_team.items():
         items.sort(key=lambda item: item[0], reverse=True)
-        for rank, (score, chain, length) in enumerate(items):
-            if rank < 7:
+        occupied: collections.Counter = collections.Counter()
+        for rank, (score, chain, obs) in enumerate(items):
+            present = published_frames(obs, interp_gap)
+            keep = rank < 7 or (len(obs) >= 20 and score >= 3.0)
+            if not keep and rescue_len > 0:
+                keep = (
+                    len(obs) >= rescue_len
+                    and max(det.conf for det in obs) >= rescue_conf
+                    and all(occupied[frame] < 7 for frame in present)
+                )
+            if keep:
                 kept.append(chain)
-                continue
-            if length >= 20 and score >= 3.0:
-                kept.append(chain)
-                continue
-            # Extra short or low-confidence chain: drop it.
+                occupied.update(present)
+            # Otherwise an extra short or low-confidence chain: drop it.
     return kept
 
 
@@ -1444,19 +1708,27 @@ def run(stem: Path, out: Path, params: dict) -> dict:
     emb = load_reid(stem, params.get("reid"))
     if emb is not None and len(emb) != len(rows):
         raise RuntimeError(f"reid rows {len(emb)} != csv rows {len(rows)}")
-    frames = build_frames(meta, rows, hist, hud, params, emb=emb)
+    icons = load_icons(stem, len(rows))
+    if icons is None:
+        print(f"no {stem.with_suffix('.icons.npy').name}; '1' plaque boxes are kept", flush=True)
+    frames = build_frames(meta, rows, hist, hud, params, emb=emb, icons=icons)
     kept = sum(len(item) for item in frames)
     forward = associate_clean(frames, motion, params)
     bwd = backward_ids(frames, motion, params)
     tlets = tracks_to_tlets(forward, markers, bwd, params)
     chains = stitch(tlets, motion, params)
     chains = drop_duplicate_chains(chains)
-    chains = limit_roster(chains)
+    chains = limit_roster(
+        chains,
+        rescue_len=params["roster_rescue_len"],
+        rescue_conf=params["roster_rescue_conf"],
+        interp_gap=params["interp_gap"],
+    )
+    kept_chains, icon_chains, icon_stripped = strip_icon_chains(chains, icons, params["icon_chain_share"])
     width, height = int(meta["width"]), int(meta["height"])
     paths = []
     teams = []
-    for chain in chains:
-        obs = chain_obs(chain)
+    for chain, obs in kept_chains:
         filled = interpolate_chain(obs, motion, hud, width, height, params)
         paths.append({det.frame: det for det in filled})
         teams.append(chain[0].team)
@@ -1475,6 +1747,15 @@ def run(stem: Path, out: Path, params: dict) -> dict:
     # Splitting changes the stable team of these boxes, so repeat same-team
     # suppression in case an established red path already covers one.
     removed += per_frame_suppress(paths, teams)
+    cone_run_boxes = remove_cone_runs(
+        paths,
+        load_warm(stem, len(rows)),
+        reference_transforms(motion),
+        width,
+        height,
+        params["cone_run_frames"],
+        params["cone_warm"],
+    )
     # The stable chain team is what gets exported. Preserve raw per-frame team
     # evidence only until all drift/occlusion repairs have consumed it.
     for path, team in zip(paths, teams):
@@ -1496,6 +1777,11 @@ def run(stem: Path, out: Path, params: dict) -> dict:
         "out": str(out),
         "params": params,
         "raw_boxes": len(rows),
+        "icon_boxes_before": 0 if icons is None else int((icons == ICON_BEFORE).sum()),
+        "icon_boxes_after": 0 if icons is None else int((icons == ICON_AFTER).sum()),
+        "icon_chains_dropped": icon_chains,
+        "icon_boxes_stripped": icon_stripped,
+        "cone_run_boxes_removed": cone_run_boxes,
         "filtered_boxes": kept,
         "forward_tracklets": len(forward),
         "stitched_chains": len(chains),

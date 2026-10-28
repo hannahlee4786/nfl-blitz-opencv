@@ -8,12 +8,17 @@ The tracker reads these files and does not rerun the detector:
     /tmp/ml_trk/det/<clip>_<tag>.motion.npy
     /tmp/ml_trk/det/<clip>_<tag>.markers.csv
     /tmp/ml_trk/det/<clip>_<tag>.hud.npy
+    /tmp/ml_trk/det/<clip>_<tag>.icons.npy
+    /tmp/ml_trk/det/<clip>_<tag>.warm.npy
     /tmp/ml_trk/det/<clip>_<tag>.meta.json
 
 CSV columns match the scorer: frame,id,team,x,y,w,h,conf.
 `motion[t]` is a 2x3 affine mapping frame t-1 onto frame t (identity at t=0).
 `hist` rows line up with CSV data rows. `hud` is a quarter-resolution mask,
-255 where a pixel stays still and is not grass.
+255 where a pixel stays still and is not grass. `icons` is a uint8 per CSV
+row for a box on the '1' player-indicator plaque: 2 is dropped before
+tracking, 1 after tracking, 0 is not the plaque. `warm` is the share of
+each row's inner box that is orange or red, the sideline-cone color test.
 """
 
 from __future__ import annotations
@@ -181,6 +186,177 @@ def build_hud(samples: list[np.ndarray]) -> np.ndarray:
     return hud
 
 
+def is_icon_box(
+    hsv: np.ndarray,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    conf: float,
+    frame_median_h: float,
+    markers: list[tuple[float, float]],
+) -> bool:
+    """True for a box on the '1' plaque that rides beside the controlled player.
+
+    The detector sometimes boxes the dark disc with a white '1' and the track
+    then follows the icon instead of the player. The plaque is a short, weak
+    box beside a blue arrow blob, mostly dark with some white digit. The
+    classical tracker's _find_marker uses the same dark-plus-white test.
+    """
+    if conf >= 0.30 or h >= 0.5 * frame_median_h or h > 1.6 * w:
+        return False
+    beside_arrow = any(
+        x + 0.5 * h <= mx <= x + w + 1.6 * h and abs(my - (y + 0.5 * h)) < 0.6 * h
+        for mx, my in markers
+    )
+    if not beside_arrow:
+        return False
+    height, width = hsv.shape[:2]
+    x1, y1 = max(0, int(x)), max(0, int(y))
+    x2 = min(width, int(x + min(w, 1.15 * h)))
+    y2 = min(height, int(y + h))
+    if x2 <= x1 or y2 <= y1:
+        return False
+    patch = hsv[y1:y2, x1:x2]
+    dark = float(((patch[..., 2] < 80) & (patch[..., 1] < 110)).mean())
+    white = float(((patch[..., 1] < 80) & (patch[..., 2] > 160)).mean())
+    return dark >= 0.30 and 0.05 <= white <= 0.40
+
+
+# Values in <stem>.icons.npy. ICON_BEFORE boxes are dropped before tracking.
+# ICON_AFTER boxes are the same plaque on a wide shot, where players are small
+# and the size test above fails. Dropping those before tracking reshuffles
+# nearby identities, so the tracker removes them after association instead.
+ICON_NONE = 0
+ICON_AFTER = 1
+ICON_BEFORE = 2
+
+
+def icon_level(
+    hsv: np.ndarray,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    conf: float,
+    frame_median_h: float,
+    markers: list[tuple[float, float]],
+) -> int:
+    """ICON_BEFORE for the original plaque test, ICON_AFTER for the size-free one.
+
+    The plaque is a fixed-size screen overlay, so the size-free test bounds the
+    box by the frame height instead of the players, and asks for the white
+    digit in the middle of the box.
+    """
+    if is_icon_box(hsv, x, y, w, h, conf, frame_median_h, markers):
+        return ICON_BEFORE
+    if h > 0.10 * hsv.shape[0]:
+        return ICON_NONE
+    if not is_icon_box(hsv, x, y, w, h, conf, float("inf"), markers):
+        return ICON_NONE
+    height, width = hsv.shape[:2]
+    x1, y1 = max(0, int(x)), max(0, int(y))
+    x2 = min(width, int(x + min(w, 1.15 * h)))
+    y2 = min(height, int(y + h))
+    patch = hsv[y1:y2, x1:x2]
+    ph, pw = patch.shape[:2]
+    core = patch[int(ph * 0.2):int(ph * 0.8), int(pw * 0.2):int(pw * 0.8)]
+    if core.size == 0:
+        return ICON_NONE
+    white = float(((core[..., 1] < 80) & (core[..., 2] > 160)).mean())
+    return ICON_AFTER if white >= 0.15 else ICON_NONE
+
+
+def warm_fraction(bgr: np.ndarray, x: float, y: float, w: float, h: float) -> float:
+    """Share of the inner box that is orange or red, as pipeline/track_clip4.py measures a cone."""
+    height, width = bgr.shape[:2]
+    x0, y0 = max(0, int(x)), max(0, int(y))
+    x1, y1 = min(width, int(round(x + w))), min(height, int(round(y + h)))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return 0.0
+    hsv = cv2.cvtColor(bgr[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+    hh, ss, vv = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    warm = ((hh <= 15) | (hh >= 170)) & (ss >= 50) & (vv >= 40)
+    ih, iw = warm.shape
+    inner = warm[ih // 5: ih - ih // 5, iw // 5: iw - iw // 5]
+    return float(inner.mean()) if inner.size else 0.0
+
+
+def write_warm_fractions(stem: Path, video: Path) -> None:
+    """Write <stem>.warm.npy, the cone warm share of every CSV row."""
+    with stem.with_suffix(".csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    by_frame: dict[int, list[int]] = {}
+    for index, row in enumerate(rows):
+        by_frame.setdefault(int(row["frame"]), []).append(index)
+    warm = np.zeros(len(rows), dtype=np.float32)
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open {video}")
+    last = max(by_frame) if by_frame else -1
+    frame_index = 0
+    while frame_index <= last:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        for index in by_frame.get(frame_index, []):
+            row = rows[index]
+            warm[index] = warm_fraction(frame, float(row["x"]), float(row["y"]), float(row["w"]), float(row["h"]))
+        frame_index += 1
+    cap.release()
+    np.save(stem.with_suffix(".warm.npy"), warm)
+
+
+def icon_flags_current(stem: Path) -> bool:
+    """True when <stem>.icons.npy exists and carries both icon levels."""
+    path = stem.with_suffix(".icons.npy")
+    return path.is_file() and np.load(path).dtype == np.uint8
+
+
+def write_icon_flags(stem: Path, video: Path) -> int:
+    """Write <stem>.icons.npy, one icon level per CSV row. Returns the flagged count."""
+    with stem.with_suffix(".csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    markers: dict[int, list[tuple[float, float]]] = {}
+    with stem.with_suffix(".markers.csv").open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            markers.setdefault(int(row["frame"]), []).append((float(row["x"]), float(row["y"])))
+    by_frame: dict[int, list[int]] = {}
+    for index, row in enumerate(rows):
+        by_frame.setdefault(int(row["frame"]), []).append(index)
+    flags = np.zeros(len(rows), dtype=np.uint8)
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"could not open {video}")
+    last = max(by_frame) if by_frame else -1
+    frame_index = 0
+    while frame_index <= last:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        indexes = by_frame.get(frame_index, [])
+        confident = [float(rows[i]["h"]) for i in indexes if float(rows[i]["conf"]) >= 0.30]
+        median_h = float(np.median(confident)) if confident else float("inf")
+        frame_markers = markers.get(frame_index, [])
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) if indexes else None
+        for index in indexes:
+            row = rows[index]
+            flags[index] = icon_level(
+                hsv,
+                float(row["x"]),
+                float(row["y"]),
+                float(row["w"]),
+                float(row["h"]),
+                float(row["conf"]),
+                median_h,
+                frame_markers,
+            )
+        frame_index += 1
+    cap.release()
+    np.save(stem.with_suffix(".icons.npy"), flags)
+    return int((flags != ICON_NONE).sum())
+
+
 def build_detector(args):
     if args.detector == "yolo":
         return YoloDetector(args.weights, args.imgsz, args.conf, sahi=False)
@@ -239,6 +415,12 @@ def main(argv: list[str] | None = None) -> int:
             and int(existing.get("limit", 0)) == 0
         ):
             print(f"cache complete, skipping: {stem}", flush=True)
+            if not icon_flags_current(stem):
+                flagged = write_icon_flags(stem, video)
+                print(f"wrote {stem.with_suffix('.icons.npy')} ({flagged} icon boxes)", flush=True)
+            if not stem.with_suffix(".warm.npy").is_file():
+                write_warm_fractions(stem, video)
+                print(f"wrote {stem.with_suffix('.warm.npy')}", flush=True)
             return 0
 
     cap = cv2.VideoCapture(str(video))
@@ -342,6 +524,8 @@ def main(argv: list[str] | None = None) -> int:
         writer = csv.writer(handle)
         writer.writerow(["frame", "x", "y", "area"])
         writer.writerows(marker_rows)
+    icon_boxes = write_icon_flags(stem, video)
+    write_warm_fractions(stem, video)
 
     steady = infer_times[1:] if len(infer_times) > 1 else infer_times
     meta = {
@@ -360,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         "height": height,
         "boxes": len(rows),
         "markers": len(marker_rows),
+        "icon_boxes": icon_boxes,
         "hud_fraction": round(float((hud > 0).mean()), 4),
         "warmup_sec": round(warmup_sec, 3),
         "sec_per_frame": round(float(np.mean(infer_times)) if infer_times else 0.0, 4),
