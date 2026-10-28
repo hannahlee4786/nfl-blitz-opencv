@@ -14,3 +14,4 @@ data/output/*
 !data/output/.gitkeep
 data/drive-download-*/
 data/labels/*.draft.json
+!data/calibration/*.npz

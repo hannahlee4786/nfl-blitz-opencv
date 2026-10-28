@@ -27,13 +27,26 @@ Optional flags after the output directory:
 
 ```bash
 bash ml/run_pipeline.sh "data/input/YOUR_CLIP.mp4" data/output/myclip \
-  --team-names Dallas,Tampa \
-  --anchor -15
+  --team-names Dallas,Tampa
 ```
 
-`--team-names` is blue team first, then red. Without it the labels read Blue and Red. `--anchor` is the yard offset on the opening frame so `x_yd` matches the painted number. The default is `-15`.
+`--team-names` is blue team first, then red. Without it the labels read Blue and Red.
 
-The opening frame has to show yard lines the field fitter can lock onto. A clip that opens on the end-zone camera prints `FATAL: no fresh fit at reference frame` and the script exits 1.
+The clip needs a field calibration (see Field calibration below). Without one the script prints `FATAL: no field calibration` and exits 1.
+
+## Field calibration
+
+Player positions on the field come from a click calibration, not from automatic line detection. Do this once per clip:
+
+```bash
+.venv/bin/python -m fieldtrack.calibrate "data/input/YOUR_CLIP.mp4"
+```
+
+Click the center of the painted 20, 30 and 40 yard numbers, left then right on each line, in the order shown. Options: `--frame N` to click on a clearer frame, `--yard-lines 40 50 F40` to click other numbers, `--far-half` when the lines are on the half away from the Cowboys end zone, `--swap-sides` when the camera faces the other end zone. This writes `data/calibration/YOUR_CLIP.npz` and a preview image; check that the grid sits on the yard lines.
+
+`ml/run_pipeline.sh` and `pipeline/track_clip4.py` pick that file up on their own (or pass `--field-calibration path.npz`). `fieldtrack/` is the field tracker and top-down map from the `player-tracking` branch. The tracked field fit is then pinned to the painted yard lines on every frame (`fieldtrack/refine.py`), so drift cannot build up, and the fit is smoothed over time. Player positions in `x_yd` / `y_yd` are the measured values, not smoothed: smoothing did not improve accuracy against hand-labeled feet. `x_smooth` / `y_smooth` are a light 5-frame smoothing, and the map in the video is drawn from those. Frames with too little field in view (close-ups) keep the plain tracker fit and show as `STALE` in the video; their positions are less reliable.
+
+Check the fit with `.venv/bin/python tools/eval_field.py`. It scores the yard lines against hand-labeled painted lines in `data/labels/field_lines.json`, for the plain tracker and the refined fit side by side. The yard-line correction only touches downfield position; sideline-to-sideline position is exactly what the tracker measures. (A version that also corrected sideways position drifted about 2 yd laterally on stationary sideline cones, so it was removed.) `x_yd` is yards from the goal line (50 is midfield) and `y_yd` is yards from the far sideline, growing toward screen right. Calibrations for the Clip 1-4 videos are in `data/calibration/`. The field model's sidelines sit on the inner edge of the white sideline band (the `player-tracking` model put them 2-3 yd outside it); see `fieldtrack/field_model.py`. That re-anchoring assumes a yard is the same length across the field as along it.
 
 ### Labeled clips
 
@@ -58,34 +71,9 @@ Game files, footage, and extracted textures stay outside the repository. You sup
 
 `./setup.sh` is the install path. It uses `uv` when that command is on `PATH`, and `python3.12 -m venv` otherwise. Running it again reinstalls the same pins and skips the YOLO download when the file hash already matches.
 
-## Field and camera tracker
-
-Three commands. The first draws the detected field lines. The second asks you to click six landmarks so the field has a coordinate system. The third follows those landmarks through the clip and redraws the grid.
-
-```bash
-.venv/bin/python -m src.main
-.venv/bin/python -m src.initialize_homography
-.venv/bin/python -m src.track_video
-```
-
-Click the points in this order. Each pair is one yard line crossing the two hash rows.
-
-```text
-Point 1: 20-yard line, left hash
-Point 2: 20-yard line, right hash
-Point 3: 30-yard line, left hash
-Point 4: 30-yard line, right hash
-Point 5: 40-yard line, left hash
-Point 6: 40-yard line, right hash
-```
-
-Left click selects a point. `U` undoes the last point. `R` clears them. Enter computes the homography. Escape cancels.
-
-The initializer writes `data/output/initial_homography.npz` and `data/output/initial_homography_preview.png`. The purple grid should sit on the yard lines before you continue. `.venv/bin/python -m src.track_video` then writes `data/output/tracked_field.mp4`. It keeps a landmark only when optical flow can track it forward and back to the same pixel, and it refits the homography from the landmarks that remain.
-
 ## Player tracker
 
-`ml/run_pipeline.sh` detects players, keeps an id on each person, projects the boxes onto the field, and fills team names. It accepts `clip4`, `clip64`, or a video path, then an output directory, then any extra `pipeline/track_clip4.py` arguments. The default anchor is `-15`. The script exits non-zero when the field fit prints a line that starts with `FATAL`.
+`ml/run_pipeline.sh` detects players, keeps an id on each person, projects the boxes onto the field, and fills team names. It accepts `clip4`, `clip64`, or a video path, then an output directory, then any extra `pipeline/track_clip4.py` arguments. The script exits non-zero when the field fit prints a line that starts with `FATAL`.
 
 When you pass `--player-boxes`, the run builds team colors itself. It samples upper-torso crops from large, confident boxes that do not overlap another box, measures a jersey color for each tracker team, and writes `<out-dir>/team_classification.json`. The team name on every box is the tracker team's display name. `team_conf` is the share of that track's confident colour frames that agree with this name, and it is 0 when the track has none.
 
@@ -101,15 +89,15 @@ A label such as `4 Red 97% | trk 82%` shows the player ID, team name, team confi
   --team-calibration data/output/myclip/team_classification.json
 ```
 
-`--field-map` is optional. Pass a top-down field image and the video gains a map panel beside the clip. Without it, the output is the annotated clip only.
+The video always shows a top-down field map beside the clip.
 
 The run writes these files into `--out-dir`:
 
 | File | Contents |
 |---|---|
 | `tracked_players.mp4` | Clip with boxes, player IDs, team names, team confidence, and tracking confidence |
-| `positions.csv` | `frame,id,team,team_name,x_yd,y_yd,track_conf,team_conf,color_coverage` |
-| `homography.npz` | Field homography for each frame, reused on the next run |
+| `positions.csv` | `frame,id,team,team_name,x_yd,y_yd,track_conf,team_conf,color_coverage,x_smooth,y_smooth` |
+| `field.npz` | Smoothed image-to-field matrix for each frame, reused on the next run |
 | `frames/` | Still frames from the video |
 
-`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera. `track_conf` is high when the detection agrees with the position predicted from nearby frames. `team_conf` is the agreement among jersey-color pixels, and `color_coverage` is the share of usable colorful pixels matching either team. The first run fits the field, and a later run on the same video reuses `homography.npz`.
+`x_yd` runs downfield. `y_yd` runs from the far sideline toward the camera. `track_conf` is high when the detection agrees with the position predicted from nearby frames. `team_conf` is the agreement among jersey-color pixels, and `color_coverage` is the share of usable colorful pixels matching either team. The first run fits the field, and a later run on the same video reuses `field.npz`.

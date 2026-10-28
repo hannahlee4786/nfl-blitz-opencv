@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
-"""Stage 3: detect players, project feet through homography onto the
-reconstructed field map."""
-import os
-import sys
+"""Color-based player detector used when no external boxes are given."""
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from field_homography import analyze, hud_mask, PXY
+
+def hud_mask(h, w, frame=None):
+    keep = np.ones((h, w), np.uint8) * 255
+    def block(x0, y0, x1, y1):
+        keep[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)] = 0
+    block(0.00, 0.00, 0.30, 0.18)   # score bug (always present)
+    block(0.05, 0.86, 0.50, 1.00)   # TURBO banner
+    block(0.55, 0.86, 1.00, 1.00)   # INSERT COINS banner
+    block(0.80, 0.80, 1.00, 0.95)   # KAG watermark
+    # restrict to the field: only pixels whose neighborhood is mostly
+    # field-colored (teal). Generic rejection of HUD boxes, banners,
+    # stadium walls without hardcoded regions.
+    if frame is not None:
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        field = ((hsv[..., 0] > 60) & (hsv[..., 0] < 110) &
+                 (hsv[..., 1] > 40)).astype(np.uint8) * 255
+        field = cv2.medianBlur(field, 9)
+        field = cv2.dilate(field, np.ones((31, 31), np.uint8))
+        keep &= field
+    return keep
 
 
 def detect_players(frame):

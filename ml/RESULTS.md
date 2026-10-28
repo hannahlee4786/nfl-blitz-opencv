@@ -17,7 +17,7 @@ Blank cells are metrics that were not part of the recorded summary for that run.
 
 Caches and library download folders live under `${NFL_ML_HOME:-$ROOT/.nfl-ml}`. The scripts set `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, and `YOLO_CONFIG_DIR` inside that directory. `NFL_ML_CACHE` defaults to `$NFL_ML_HOME/cache`.
 
-`ml/run_pipeline.sh` detects, embeds, associates, projects the boxes, and writes automatic team colors. A finished detection cache and a finished embedding cache are reused. The field script reuses `homography.npz` when that file is already in the output directory.
+`ml/run_pipeline.sh` detects, embeds, associates, projects the boxes, and writes automatic team colors. A finished detection cache and a finished embedding cache are reused. The field script reuses `field.npz` when it is already in the output directory.
 
 ```
 bash ml/run_pipeline.sh clip4 data/output/clip4
@@ -26,7 +26,7 @@ bash ml/run_pipeline.sh clip64 data/output/clip64
 .venv/bin/python tools/eval_tracking.py --labels data/labels/clip64.json --boxes data/output/clip64/boxes.csv
 ```
 
-An arbitrary video is `bash ml/run_pipeline.sh /path/to/video.mp4 /path/to/out_dir`. The cache name is the file stem. `ml/detect_all.py` accepts `--video` for that case. Named clips `clip4` and `clip64` keep the previous video paths. Extra arguments after the output directory are passed to `pipeline/track_clip4.py`. The script already passes `--anchor -15` unless you pass `--anchor` yourself.
+An arbitrary video is `bash ml/run_pipeline.sh /path/to/video.mp4 /path/to/out_dir`. The cache name is the file stem. `ml/detect_all.py` accepts `--video` for that case. Named clips `clip4` and `clip64` keep the previous video paths. Extra arguments after the output directory are passed to `pipeline/track_clip4.py`.
 
 To rebuild the detection cache, delete `$NFL_ML_CACHE/det/<clip>_yolo11m.meta.json` and the sibling `.csv`, `.npy`, and `.reid.*` files, then run the shell script again.
 
@@ -36,7 +36,9 @@ The virtual environment is `.venv`. YOLO11m weights are `models/yolo11m.pt` (dow
 
 ## Field positions
 
-`--player-boxes` projects each box foot, then keeps the gates that reject a bad projection. A missing projection is dropped. Field y above 50 is dropped, which is the upper bound inside `_accepted_body`. The lower bound of -10 is not applied: a learned box on the quarterback lands just past that line, at the same point the classical track publishes. Foot width is the centre 40% of the bottom edge, and it still has to be at most 6.5 yards. The 0.25 yard minimum is not applied, because distant players are narrower than that. `_on_this_field` then keeps x in -15 to 125 yards, or a point within 18 yards of that frame's median x. `_clamp_step` moves an accepted point at most 6 yards from that id's previous point. A rejected point leaves `x_yd` and `y_yd` empty and stays in `boxes.csv`.
+The yard figures in the table below were measured before the field fit was replaced by `fieldtrack/` (click calibration, tracked and smoothed homographies, smoothed positions) and are out of date.
+
+`--player-boxes` projects each box foot, then keeps the gates that reject a bad projection. A missing projection is dropped. Field y above 56 (the sideline at 53.33 plus a margin) is dropped, which is the upper bound inside `_accepted_body`. The lower bound of -10 is not applied: a learned box on the quarterback lands just past that line, at the same point the classical track publishes. Foot width is the centre 40% of the bottom edge, and it still has to be at most 6.5 yards. The 0.25 yard minimum is not applied, because distant players are narrower than that. `_on_this_field` then keeps x in -15 to 125 yards, or a point within 18 yards of that frame's median x. `_clamp_step` moves an accepted point at most 6 yards from that id's previous point. A rejected point leaves `x_yd` and `y_yd` empty and stays in `boxes.csv`.
 
 After those gates, a whole track is removed when it is a sideline cone. The track lasts at least 12 frames. Its median box is at most 6 percent of the frame tall and at most 4 percent of the frame wide, and the median share of warm orange or red pixels in the inner crop is at least 0.30. The detector's camera-motion transforms map each foot back to frame zero; at least 60 percent must remain within 30 pixels of the median, with a median distance no greater than 18 pixels and inlier spread no greater than 24 pixels horizontally and 14 vertically. This camera-fixed test still works when field homographies are stale. When camera motion is unavailable, the older ground-plane boundary and formation tests remain as a fallback.
 

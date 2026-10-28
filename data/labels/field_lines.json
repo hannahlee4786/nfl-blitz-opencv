@@ -1,0 +1,74 @@
+{
+ "note": "Painted yard-line rows (screen v, source pixels) at screen column u, read by eye from the frame. Held out: not used to tune fieldtrack.refine.",
+ "frames": [
+  {
+   "clip": "Clip_4 Camera Swing and Distance Change Test",
+   "frame": 100,
+   "u": 550,
+   "v": [
+    210,
+    255,
+    312,
+    380,
+    455,
+    553,
+    683,
+    855
+   ]
+  },
+  {
+   "clip": "Clip_4 Camera Swing and Distance Change Test",
+   "frame": 190,
+   "u": 700,
+   "v": [
+    245,
+    300,
+    365,
+    450,
+    560,
+    695,
+    890
+   ]
+  },
+  {
+   "clip": "Clip_2 Congestion Contact Test",
+   "frame": 20,
+   "u": 700,
+   "v": [
+    252,
+    312,
+    382,
+    465,
+    578,
+    718,
+    925
+   ]
+  },
+  {
+   "clip": "Clip_1 Kickoff return not QB",
+   "frame": 40,
+   "u": 900,
+   "v": [
+    195,
+    262,
+    350,
+    470,
+    645,
+    930
+   ]
+  },
+  {
+   "clip": "Clip_1 Kickoff return not QB",
+   "frame": 100,
+   "u": 700,
+   "v": [
+    195,
+    262,
+    350,
+    470,
+    645,
+    915
+   ]
+  }
+ ]
+}

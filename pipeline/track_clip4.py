@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 """Full-clip player tracking for Clip 4 (camera swing + zoom test).
 
-Reuses the Clip 3 pipeline (tools/track_clip.py) unchanged where possible.
-Clip 4 specifics:
-  * REF_FRAME = 0 (wide shot behind the offense at the 50).
-  * Anchor: fresh x and absolute x share direction at frame 0; the orange
-    line of scrimmage (absolute 50) lands at fresh x ~ 66 and the red
-    first-down line (absolute 21) at fresh x ~ 37.5, so the translation
-    snaps to -15 on the 5-yard grid (no axis flip needed at frame 0).
-  * Fresh-fit x direction is NOT stable across frames (frame 40 indexes the
-    opposite way), so reconcile() additionally tries axis flips.
-  * Inter-frame homographies are sanity-gated (scale / rotation /
-    translation limits) before being chained; failures hold the previous
-    transform (STALE).
-  * Flow mask additionally excludes orange overlays (LOS line, flame
-    effects, football) that appear late in the clip.
+Field positions come from fieldtrack (click calibration plus tracked,
+smoothed homographies). This file turns player boxes into field positions,
+renders the video with the top-down map, and writes positions.csv.
 """
 import csv
+from types import SimpleNamespace
 import json
 import os
 import sys
@@ -27,26 +17,36 @@ PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(PIPELINE_DIR)
 sys.path.insert(0, PIPELINE_DIR)
 sys.path.insert(0, PROJECT_ROOT)
-import field_homography as fh
-from track_clip import (fit_frame, inter_frame_h,
-                        TEAM_BGR, STATUS_BGR, LEFT_SCALE, to_map)
 from project_players import detect_players
+from fieldtrack.adapter import GOAL_LINE_X, field_homographies
+from fieldtrack.smooth import smooth_tracks
+from fieldtrack.topdown import TopDownField, auto_orientation
 from src.team_classifier import (ColorPrototype, build_color_prototype,
                                  classify_jersey_region, crop_region,
                                  load_calibration_report, prototype_distance)
 
 CLIP = "Clip_4 Camera Swing and Distance Change Test.mp4"
 REF_FRAME = 0
-REF_ANCHOR = -15.0         # fresh x - 15 = absolute yards (verified vs the
-                           # orange LOS at the 50 and red 1st-down at the 21)
-PXY = fh.PXY
+TEAM_BGR = dict(red=(0, 0, 255), blue=(255, 100, 0), white=(255, 255, 255))
+STATUS_BGR = dict(fresh=(80, 220, 80), chained=(60, 200, 255), stale=(60, 60, 255))
+LEFT_SCALE = 0.5
 OUT_VIDEO = "data/output/tracked_players.mp4"
 OUT_CSV = "data/output/positions.csv"
 OUT_BOXES = "data/output/boxes.csv"
 SAMPLE_AT = {0, 30, 60, 120, 180, 240}
 SAMPLE_DIR = "data/output/frames"
-HOMOGRAPHY_CACHE = "data/output/homography.npz"
-FIELD_MAP = ""
+FIELD_CACHE = "data/output/field.npz"
+# Click-calibrated field fit (python -m fieldtrack.calibrate). Required.
+FIELD_CALIBRATION = None
+# Largest field y (yards from the far sideline) a foot may land on. The
+# field is 53.33 yards wide, so the sideline plus a margin.
+Y_MAX = 56.0
+# Top-down map orientation, chosen from the camera once the field is tracked.
+MAP_ORIENTATION = "ccw"
+# Display-only smoothing of the dots and trails on the map (frames). The
+# published x_yd / y_yd are never smoothed.
+SMOOTH_WINDOW = 5
+_TOPDOWN = None
 TEAM_PROTOTYPES = None
 # External boxes CSV. None keeps the built-in detector and tracker.
 PLAYER_BOXES = None
@@ -193,42 +193,8 @@ def _iter_frames(n, frames):
 
 
 # ---------------------------------------------------------------- optical flow
-def flow_mask4(frame):
-    """Clip 4 flow mask: field prior minus players/HUD minus orange
-    overlays (LOS line, flames, football) that move or sit off-plane."""
-    h, w = frame.shape[:2]
-    keep = fh.hud_mask(h, w, frame)
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    hch, sch, vch = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    players = (((hch < 12) | (hch > 168)) & (sch > 90)) | \
-              ((hch > 100) & (hch < 135) & (sch > 90)) | \
-              ((sch < 55) & (vch > 150)) | \
-              ((hch >= 8) & (hch <= 30) & (sch > 120) & (vch > 120))
-    players = cv2.dilate(players.astype(np.uint8) * 255,
-                         np.ones((15, 15), np.uint8))
-    return cv2.bitwise_and(keep, cv2.bitwise_not(players))
 
 
-def g_sane(G, w, h):
-    """Reject inter-frame homographies with absurd scale/rotation/shift.
-    At 30 fps even the big swing moves only a few deg / few % per frame."""
-    if G is None:
-        return False
-    c = np.array([w / 2.0, h / 2.0])
-    pts = np.array([[[c[0], c[1]]], [[c[0] + 100, c[1]]],
-                    [[c[0], c[1] + 100]]], np.float32)
-    q = cv2.perspectiveTransform(pts, G.astype(np.float32))[:, 0, :]
-    dx = (q[1] - q[0]) / 100.0
-    dy = (q[2] - q[0]) / 100.0
-    sx, sy = np.linalg.norm(dx), np.linalg.norm(dy)
-    if not (0.75 < sx < 1.33 and 0.75 < sy < 1.33):
-        return False
-    rot = np.degrees(np.arctan2(dx[1], dx[0]))
-    if abs(rot) > 12.0:
-        return False
-    if np.linalg.norm(q[0] - c) > 220.0:
-        return False
-    return True
 
 
 # ---------------------------------------------------------------- reconcile
@@ -236,39 +202,6 @@ FLIPS = (np.eye(3), np.diag([-1.0, 1.0, 1.0]),
          np.diag([1.0, -1.0, 1.0]), np.diag([-1.0, -1.0, 1.0]))
 
 
-def reconcile4(A_chain, H_fresh, info, shape):
-    """Clip 3 reconcile, but tries axis flips: fresh-fit x/y directions
-    are arbitrary on Clip 4 (indexing direction flips between frames).
-    Returns adjusted absolute H or None."""
-    h, w = shape[:2]
-    us = np.linspace(0.2 * w, 0.8 * w, 4)
-    vs = np.linspace(0.35 * h, 0.75 * h, 3)
-    P = np.array([[[u, v]] for u in us for v in vs], np.float32)
-    Xc = cv2.perspectiveTransform(P, A_chain.astype(np.float32))[:, 0, :]
-    best, best_rms = None, None
-    for F in FLIPS:
-        Hf = F @ H_fresh
-        Xf = cv2.perspectiveTransform(P, Hf.astype(np.float32))[:, 0, :]
-        dx = float(np.median(Xc[:, 0] - Xf[:, 0]))
-        dy = float(np.median(Xc[:, 1] - Xf[:, 1]))
-        dx_snap = round(dx / 5.0) * 5.0
-        if abs(dx - dx_snap) > 1.5:
-            continue
-        if info["sideline"]:
-            if abs(dy) >= 5.0:
-                continue
-            dy_use = 0.0
-        else:
-            dy_use = dy
-        T = np.array([[1, 0, dx_snap], [0, 1, dy_use], [0, 0, 1.0]])
-        A_new = T @ Hf
-        Xn = cv2.perspectiveTransform(P, A_new.astype(np.float32))[:, 0, :]
-        rms = float(np.sqrt(((Xn - Xc) ** 2).sum(axis=1).mean()))
-        if rms > 3.0:
-            continue
-        if best is None or rms < best_rms:
-            best, best_rms = A_new, rms
-    return best
 
 
 # ---------------------------------------------------------------- players
@@ -1766,7 +1699,7 @@ def _accepted_body(det, A):
     width_yd = float(np.linalg.norm(wc[1] - wc[0]))
     if not (0.25 <= width_yd <= 6.5):
         return None
-    if not (-10 <= yw <= 50):
+    if not (-10 <= yw <= Y_MAX):
         return None
     if det["team"] == "blue" and width_yd >= 3.2 and bw > bh * 1.15:
         return None
@@ -1791,7 +1724,7 @@ def _external_body(bbox, A):
     if world is None or not np.isfinite(world).all():
         return None
     xw, yw = float(world[0]), float(world[1])
-    if yw > 50:
+    if yw > Y_MAX:
         return None
     x0, y0, bw, bh = bbox
     inset = 0.30
@@ -5223,16 +5156,14 @@ def _auto_team_prototypes(video_path, boxes_path, team_names):
     }
 
 
-def render_aligned(frame, tracks, dets, status, field_map):
-    """Bird's eye panel facing the same way as the camera.
+def render_aligned(frame, tracks, dets, status):
+    """Gameplay frame with boxes on the left, top-down field map on the right.
 
-    The whole field stays fixed for the entire clip. Only the dots move.
-    Measured on frame 0: image-up is decreasing field x (toward the end
-    zone the camera looks at) and image-left is decreasing field y (far
-    sideline). A counter-clockwise quarter turn plus a vertical flip puts
-    that end zone at the top and the far sideline on the left, so forward
-    in the clip is north on the map.
+    The map is fieldtrack.topdown (from the player-tracking branch): a 120 x
+    53.33 yard field drawn at the measured yard-number and hash positions,
+    oriented to match the camera. Only the dots and trails move.
     """
+    global _TOPDOWN
     h, w = frame.shape[:2]
     left = frame.copy()
     for d in dets:
@@ -5257,39 +5188,19 @@ def render_aligned(frame, tracks, dets, status, field_map):
                 cv2.FONT_HERSHEY_SIMPLEX, 1.4,
                 STATUS_BGR.get(status, (255, 255, 255)), 3)
     left = cv2.resize(left, (int(w * LEFT_SCALE), int(h * LEFT_SCALE)))
-    if field_map is None:
-        return left
-
-    def _on_map(world):
-        mx, my = to_map(world)
-        return (int(mx), int(my))
-
-    fmap = field_map.copy()
+    if _TOPDOWN is None or _TOPDOWN.base.shape[0] != left.shape[0]:
+        _TOPDOWN = TopDownField(left.shape[0], MAP_ORIENTATION)
+    shown = []
     for tr in tracks:
         visible_team = str(tr.get("team_name", "")).strip().lower()
-        color_team = visible_team if visible_team in TEAM_BGR else tr["team"]
-        c = TEAM_BGR.get(color_team, (0, 255, 255))
-        pts = list(tr["trail"])
-        for i in range(1, len(pts)):
-            a = _on_map(pts[i - 1])
-            b = _on_map(pts[i])
-            fade = 0.3 + 0.7 * i / len(pts)
-            cv2.line(fmap, a, b, tuple(int(ch * fade) for ch in c), 3)
-        cv2.circle(fmap, _on_map(tr["pos"]), 14, c, -1)
-        cv2.circle(fmap, _on_map(tr["pos"]), 14, (255, 255, 255), 2)
-    # (mx, my) -> (my, mx): north (small x) at the top, far sideline at left
-    fmap = cv2.rotate(fmap, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    fmap = cv2.flip(fmap, 0)
-    scale = left.shape[0] / fmap.shape[0]
-    fmap = cv2.resize(fmap, (int(fmap.shape[1] * scale), left.shape[0]))
-    for tr in tracks:
-        mx, my = _on_map(tr["pos"])
-        _label(fmap, str(tr["id"]), (my * scale + 8, mx * scale - 6), 0.45)
-    # north is the direction the camera faces
-    cx = fmap.shape[1] // 2
-    cv2.arrowedLine(fmap, (cx, 46), (cx, 16), (255, 255, 255), 2, tipLength=0.35)
-    _label(fmap, "N", (cx + 8, 28), 0.6)
-    return np.hstack([left, fmap])
+        team = visible_team if visible_team in TEAM_BGR else tr["team"]
+        # The pipeline's world frame is yards from the goal line; the map's is
+        # yards from the back of the end zone.
+        shown.append(SimpleNamespace(
+            id=tr["id"], team=team, matched=True,
+            position=(tr["pos"][0] + GOAL_LINE_X, tr["pos"][1]),
+            history=[(x + GOAL_LINE_X, y) for x, y in tr["trail"]]))
+    return np.hstack([left, _TOPDOWN.render(shown)])
 
 
 # ---------------------------------------------------------------- main
@@ -5339,164 +5250,61 @@ def track_screen_points(previous_gray, current_gray, previous_points):
     return current_points.reshape(-1, 2), valid
 
 
-def _seed_landmarks(A, shape):
-    """Yard-line by cross-field grid, kept where it falls inside the picture."""
-    h, w = shape[:2]
-    world, screen = [], []
-    for x in np.arange(10.0, 80.0, 5.0):
-        for y in np.arange(-4.0, 40.0, 4.0):
-            px = _feet_px((float(x), float(y)), A)
-            if px is None:
-                continue
-            u, v = px
-            if 30 < u < w - 30 and 0.08 * h < v < 0.84 * h:
-                world.append((float(x), float(y)))
-                screen.append((u, v))
-    if not world:
-        return np.zeros((0, 2), np.float32), np.zeros((0, 2), np.float32)
-    return np.array(world, np.float32), np.array(screen, np.float32)
 
 
-def _homography_step_ok(prev_A, new_A, shape):
-    """A field point should not leap across the picture in one frame."""
-    height, width = shape[:2]
-    worlds = np.array([[(x, y)] for x in np.linspace(20, 80, 7)
-                       for y in np.linspace(0, 36, 5)], np.float32)
-    try:
-        inv0 = np.linalg.inv(prev_A).astype(np.float32)
-        inv1 = np.linalg.inv(new_A).astype(np.float32)
-    except np.linalg.LinAlgError:
-        return False
-    p0 = cv2.perspectiveTransform(worlds, inv0)[:, 0, :]
-    p1 = cv2.perspectiveTransform(worlds, inv1)[:, 0, :]
-    if not np.isfinite(p0).all() or not np.isfinite(p1).all():
-        return False
-    on = ((p0[:, 0] > 0) & (p0[:, 0] < width)
-          & (p0[:, 1] > 0.05 * height) & (p0[:, 1] < 0.92 * height))
-    if int(on.sum()) < 4:
-        return True
-    shift = np.linalg.norm(p1[on] - p0[on], axis=1)
-    return float(np.median(shift)) <= 28.0
 
 
-def _homography_image_to_world(world, screen):
-    """Their fit maps field -> screen. Ours maps screen -> field."""
-    H, mask = cv2.findHomography(world, screen, cv2.RANSAC, 3.0)
-    if H is None or mask is None:
-        return None, None
-    A = np.linalg.inv(H)
-    A = A / A[2, 2]
-    return A, mask.reshape(-1).astype(bool)
 
 
-def track_field_homographies(A0, n):
-    """Carry the frame-0 field homography by tracking its landmarks."""
-    cap = cv2.VideoCapture(CLIP)
-    ok, prev = _take(cap)
-    if not ok:
-        raise RuntimeError("could not read clip for field tracking")
-    shape = prev.shape
-    world, screen = _seed_landmarks(A0, shape)
-    print(f"field landmarks at snap: {len(world)}")
-    As = [np.array(A0, np.float64)]
-    status = ["fresh"]
-    prev_gray = cv2.GaussianBlur(cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-    A = np.array(A0, np.float64)
-    held = 0
-    for t in range(1, n):
-        ok, frame = _take(cap)
-        if not ok:
-            break
-        gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5, 5), 0)
-        updated = False
-        if len(screen) >= 4:
-            cur, valid = track_screen_points(prev_gray, gray, screen)
-            if cur is not None and int(valid.sum()) >= 4:
-                new_A, inliers = _homography_image_to_world(world[valid], cur[valid])
-                if (new_A is not None and int(inliers.sum()) >= 4
-                        and _homography_step_ok(A, new_A, shape)):
-                    A = new_A
-                    world = world[valid][inliers]
-                    screen = cur[valid][inliers]
-                    updated = True
-        if len(world) < 12:
-            extra_w, extra_s = _seed_landmarks(A, shape)
-            if len(extra_w):
-                keep_w, keep_s = [world], [screen]
-                for p, q in zip(extra_w, extra_s):
-                    if len(screen) == 0 or np.linalg.norm(screen - q, axis=1).min() > 36:
-                        keep_w.append(p.reshape(1, 2))
-                        keep_s.append(q.reshape(1, 2))
-                world = np.vstack(keep_w) if len(world) else extra_w
-                screen = np.vstack(keep_s) if len(screen) else extra_s
-        if not updated:
-            held += 1
-            if len(world):
-                reproj = [_feet_px(tuple(p), A) for p in world]
-                screen = np.array(
-                    [p if p is not None else (0.0, 0.0) for p in reproj],
-                    np.float32)
-        As.append(A)
-        status.append("chained" if updated else "stale")
-        prev_gray = gray
-        if t % 40 == 0:
-            print(f"field {t}/{n} points={len(world)} updated={updated}")
-    cap.release()
-    print(f"field tracking held the previous homography on {held}/{n - 1} frames")
-    return As, status
 
 
-def load_homographies(n):
-    if not os.path.exists(HOMOGRAPHY_CACHE):
-        return None
-    z = np.load(HOMOGRAPHY_CACHE)
-    if z["A"].shape[0] != n:
-        return None
-    print(f"loaded homographies from {HOMOGRAPHY_CACHE}")
-    return list(z["A"]), [str(s) for s in z["status"]]
 
 
-def save_homographies(A, status):
-    np.savez(HOMOGRAPHY_CACHE, A=np.stack(A), status=np.array(status))
-    print(f"cached homographies to {HOMOGRAPHY_CACHE}")
 
 
 def main():
     cap = cv2.VideoCapture(CLIP)
     n_full = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"frames: {n_full}", flush=True)
-    cached = load_homographies(n_full)
-    n = n_full
-    if STOP_AT is not None:
-        n = min(n_full, max(0, int(STOP_AT)))
-        print(f"stop-at: {n}", flush=True)
-    if cached is not None:
-        cap.release()
-        publish(n, cached[0][:n], cached[1][:n])
-        return
-
-    ok, frame = _take(cap)
     cap.release()
-    if not ok:
-        print("FATAL: could not read the opening frame")
+    if not FIELD_CALIBRATION:
+        print("FATAL: no field calibration. Run "
+              f"python -m fieldtrack.calibrate \"{CLIP}\" once, or pass --field-calibration.")
         return
-    try:
-        H, info = fit_frame(frame)
-    except Exception as e:
-        H, info = None, str(e)
-    if H is None:
-        print(f"FATAL: no fresh fit at reference frame ({info})")
-        return
-    anchor = np.array([[1, 0, REF_ANCHOR], [0, 1, 0], [0, 0, 1.0]])
-    A, status = track_field_homographies(anchor @ H, n)
-    n_fresh = sum(1 for s in status if s == "fresh")
-    n_chained = sum(1 for s in status if s == "chained")
-    n_stale = sum(1 for s in status if s == "stale")
-    print(f"status: fresh={n_fresh} chained={n_chained} stale={n_stale}")
-    # A short run must not replace a full-clip homography cache.
-    if n == n_full:
-        save_homographies(A, status)
-    publish(n, A, status)
+    field_tracked_main(n_full)
+
+
+def field_tracked_main(n_full):
+    """Field positions from the click calibration and the fieldtrack tracker."""
+    from fieldtrack.adapter import field_homographies
+    n = n_full if STOP_AT is None else min(n_full, max(0, int(STOP_AT)))
+    cache = FIELD_CACHE
+    stamp = os.path.getmtime(FIELD_CALIBRATION)
+    if os.path.exists(cache):
+        z = np.load(cache)
+        if z["A"].shape[0] == n_full and float(z["stamp"]) == stamp:
+            print(f"loaded field-tracked homographies from {cache}")
+            _set_map_orientation(z["A"][0])
+            publish(n, list(z["A"])[:n], [str(x) for x in z["status"]][:n])
+            return
+    print(f"tracking the field from {FIELD_CALIBRATION}", flush=True)
+    A, status = field_homographies(CLIP, FIELD_CALIBRATION, n_full)
+    print("status: " + ", ".join(
+        f"{k}={status.count(k)}" for k in ("fresh", "chained", "stale")))
+    np.savez(cache, A=np.stack(A), status=np.array(status), stamp=stamp)
+    _set_map_orientation(A[0])
+    publish(n, A[:n], status[:n])
+
+
+def _set_map_orientation(A0):
+    """Pick the map orientation that matches how the camera faces the field."""
+    global MAP_ORIENTATION
+    cap = cv2.VideoCapture(CLIP)
+    size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    cap.release()
+    field_to_screen = np.linalg.inv(np.asarray(A0, np.float64)) @ np.array(
+        [[1.0, 0.0, -GOAL_LINE_X], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    MAP_ORIENTATION = auto_orientation(field_to_screen, size)
 
 
 def publish(n, A, status):
@@ -5946,12 +5754,39 @@ def _sideline_cone_ids(samples, frame_hw):
     return cones
 
 
+def _smooth_positions(rows, pending_draw):
+    """Add x_smooth / y_smooth columns and steady the dots and trails on the map.
+
+    x_yd / y_yd stay the measured positions. Smoothing did not make them more
+    accurate against hand-labeled feet, so it is only a display aid and is kept
+    in its own columns.
+    """
+    points = {}
+    for row in rows:
+        if row[4] != "":
+            points.setdefault(row[1], {})[row[0]] = (float(row[4]), float(row[5]))
+    smoothed = smooth_tracks(points, window=SMOOTH_WINDOW)
+    for row in rows:
+        pos = smoothed.get(row[1], {}).get(row[0])
+        row.extend(["", ""] if pos is None else [round(pos[0], 2), round(pos[1], 2)])
+    for frame_i, mapped, drawn in pending_draw:
+        for tr in mapped:
+            by_frame = smoothed.get(tr["id"], {})
+            if frame_i not in by_frame:
+                continue
+            tr["pos"] = by_frame[frame_i]
+            tr["trail"] = [by_frame[f] for f in sorted(by_frame) if f <= frame_i]
+        for tr in drawn:
+            pos = smoothed.get(tr["id"], {}).get(frame_i)
+            if pos is not None:
+                tr["pos"] = pos
+
+
 def render_external_boxes(n, A, status):
     """Project and draw boxes from PLAYER_BOXES. Field homographies stay as given."""
     header, box_lines = _load_box_lines(PLAYER_BOXES)
     frames = _load_frames(n)
     os.makedirs(SAMPLE_DIR, exist_ok=True)
-    field_map = cv2.imread(FIELD_MAP) if FIELD_MAP else None
     writer, out_path = None, OUT_VIDEO
     rows = []
     trails = {}
@@ -6112,6 +5947,7 @@ def render_external_boxes(n, A, status):
             pending_draw.append((i, mapped, drawn))
         if i % 40 == 0:
             print(f"boxes {i}/{n} tracks={len(active)}", flush=True)
+    _smooth_positions(rows, pending_draw)
     if TEAM_PROTOTYPES is not None:
         _apply_track_team_votes(rows, TEAM_PROTOTYPES)
         voted = _team_choices_by_frame(rows)
@@ -6136,7 +5972,7 @@ def render_external_boxes(n, A, status):
                 continue
             _frame_i, mapped, drawn = pending_draw[pending_i]
             pending_i += 1
-            combo = render_aligned(frame, mapped, drawn, status[i], field_map)
+            combo = render_aligned(frame, mapped, drawn, status[i])
             if i in SAMPLE_AT:
                 cv2.imwrite(f"{SAMPLE_DIR}/composite_{i:04d}.png", combo)
             if WRITE_VIDEO:
@@ -6150,7 +5986,7 @@ def render_external_boxes(n, A, status):
         wcsv = csv.writer(handle)
         wcsv.writerow([
             "frame", "id", "team", "team_name", "x_yd", "y_yd",
-            "track_conf", "team_conf", "color_coverage",
+            "track_conf", "team_conf", "color_coverage", "x_smooth", "y_smooth",
         ])
         wcsv.writerows(rows)
     print(f"wrote {OUT_CSV} ({len(rows)} rows)")
@@ -6297,7 +6133,6 @@ def render_pass(n, A, status):
         tracked = _relink_published(tracked, frames, shape, roster)
 
     os.makedirs(SAMPLE_DIR, exist_ok=True)
-    field_map = cv2.imread(FIELD_MAP) if FIELD_MAP else None
     writer, out_path = None, OUT_VIDEO
     rows = []
     box_rows = []
@@ -6352,7 +6187,7 @@ def render_pass(n, A, status):
                 round(float(tr["conf"]), 4),
             ])
         if WRITE_VIDEO or i in SAMPLE_AT:
-            combo = render_aligned(frame, active, active, status[i], field_map)
+            combo = render_aligned(frame, active, active, status[i])
             if i in SAMPLE_AT:
                 cv2.imwrite(f"{SAMPLE_DIR}/composite_{i:04d}.png", combo)
             if WRITE_VIDEO:
@@ -6394,14 +6229,7 @@ if __name__ == "__main__":
         description="Track the field and the players in a gameplay video.")
     parser.add_argument("--video", required=True, help="Path to the input video.")
     parser.add_argument("--out-dir", default="data/output",
-                        help="Directory for the video, CSV, and homography cache.")
-    parser.add_argument("--anchor", type=float, default=-15.0,
-                        help="Yards added on the reference frame so x matches the field.")
-    parser.add_argument("--field-map",
-                        default=os.path.join(
-                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "data", "field_map.png"),
-                        help="Top-down field image for the vertical map panel.")
+                        help="Directory for the video, CSV, and field cache.")
     parser.add_argument(
         "--team-calibration",
         help=("JSON report created by src.classify_teams; enables team names "
@@ -6428,6 +6256,10 @@ if __name__ == "__main__":
         help=("NumPy array of per-frame affine camera motion. Used to reject "
               "small, field-fixed sideline cones when --player-boxes is set."),
     )
+    parser.add_argument(
+        "--field-calibration", default=None,
+        help=("Click calibration from python -m fieldtrack.calibrate. Default: "
+              "data/calibration/<video name>.npz."))
     parser.add_argument("--stop-at", type=int, default=None, metavar="N",
                         help="Process only frames 0..N-1. Frame 0 stays the roster frame.")
     args = parser.parse_args()
@@ -6436,11 +6268,19 @@ if __name__ == "__main__":
     OUT_VIDEO = os.path.join(args.out_dir, "tracked_players.mp4")
     OUT_CSV = os.path.join(args.out_dir, "positions.csv")
     OUT_BOXES = os.path.join(args.out_dir, "boxes.csv")
-    HOMOGRAPHY_CACHE = os.path.join(args.out_dir, "homography.npz")
+    FIELD_CACHE = os.path.join(args.out_dir, "field.npz")
     SAMPLE_DIR = os.path.join(args.out_dir, "frames")
     os.makedirs(SAMPLE_DIR, exist_ok=True)
-    REF_ANCHOR = args.anchor
-    FIELD_MAP = args.field_map
+    FIELD_CALIBRATION = args.field_calibration
+    if FIELD_CALIBRATION is None:
+        guess = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "calibration",
+            os.path.splitext(os.path.basename(args.video))[0] + ".npz")
+        if os.path.exists(guess):
+            FIELD_CALIBRATION = guess
+    if FIELD_CALIBRATION:
+        print(f"field: click calibration {FIELD_CALIBRATION}")
     WRITE_VIDEO = not args.no_video
     STOP_AT = args.stop_at
     PLAYER_BOXES = args.player_boxes
